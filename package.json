@@ -1,0 +1,21 @@
+{
+  "name": "x-autopost-library",
+  "version": "1.0.0",
+  "description": "",
+  "author": "kztmk",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc",
+    "deploy": "npm run build && clasp push"
+  },
+  "dependencies": {
+    "@types/google-apps-script": "^1.0.97"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "eslint": "^9.22.0",
+    "eslint-plugin-googleappsscript": "^1.0.5",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.6"
+  }
+}
