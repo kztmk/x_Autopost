@@ -1,6 +1,7 @@
 .git/
+dist/
 node_modules/
-src/  // TypeScript ファイルはアップロードしない
+src/
 tsconfig.json
 package*.json
 package-lock.json
@@ -12,5 +13,3 @@ appsscript.json
 .claspignore
 .eslintrc.js
 .eslintignore
-dist/**/*.js.map  // ソースマップもアップロードしない
-dist/test
