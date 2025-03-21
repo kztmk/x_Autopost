@@ -36,6 +36,17 @@ interface RDPostData {
   functionName: 'deleteAllPostsData' | 'getPostsData';
 }
 
+interface XMediaFile {
+  functionName: 'uploadMediaFile';
+  filename: string;
+  filedata: string;
+  mimeType: string;
+}
+
+interface XMediaFileData {
+  xMediaFileData: XMediaFile[];
+}
+
 /**
  * 公開するAPI関数の定義
  * ＠param {XAuthInfo | XPostData | XPostTrigger | RDPostsData} e リクエストパラメータ
@@ -78,6 +89,17 @@ interface RDPostData {
  *  functionName: 'deleteAllPostsData' | 'getPostsData';
  * }
  *
+ * interface XMediaFile {
+ *  functionName: 'uploadMediaFile';
+ *  filename: string;
+ *  filedata: string;
+ *  mimeType: string;
+ * }
+ *
+ * interface XMediaFileData {
+ *  xMediaFileData: XMediaFile[];
+ * }
+ *
  * リクエストパラメーターのfunctionNameによって、実行する関数を切り替えます。
  *   1. writeAuthInfo: 認証情報をLibraryPropertyへ保存
  *   2. clearAuthInfo: 認証情報をLibraryPropertyから削除
@@ -87,6 +109,7 @@ interface RDPostData {
  *   6. deleteAllPostsData: Postsシートのすべてのデータを削除
  *   7. createTrigger: トリガーを作成
  *   8. deleteTrigger: トリガーを削除
+ *   9. uploadMediaFile: メディアファイルをGoogle Driveにアップロード
  *   
  * 
  * @returns {GoogleAppsScript.Content.TextOutput} レスポンス
@@ -94,6 +117,8 @@ interface RDPostData {
  */
 
 import { createTimeBasedTrigger, deleteAllTriggers } from './main';
+
+const POSTS_SHEET_NAME = 'Posts';
 
 /**
  * データの入出力をAPIとして公開する
@@ -161,6 +186,9 @@ function doPost(
     case 'getPostsData':
       return getPostsData(e);
 
+    case 'uploadMediaFile':
+      return uploadMediaFile(e);
+
     default:
       return ContentService.createTextOutput(
         JSON.stringify({
@@ -179,7 +207,7 @@ function deployAsWebApp(): string {
 }
 
 function createPostsSheet(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
-  const postsSheet = ss.insertSheet('Posts');
+  const postsSheet = ss.insertSheet(POSTS_SHEET_NAME);
   postsSheet
     .getRange('A1:H1')
     .setValues([
@@ -373,7 +401,7 @@ function writePostsData(
   try {
     const requestBody: XPostsData = JSON.parse(e.postData.contents);
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    let postsSheet = ss.getSheetByName('Posts');
+    let postsSheet = ss.getSheetByName(POSTS_SHEET_NAME);
     // シートが存在しない場合は作成し、ヘッダー行を追加
     if (!postsSheet) {
       postsSheet = createPostsSheet(ss);
@@ -465,7 +493,7 @@ function deletePostsData(
   try {
     const requestBody: XPostsData = JSON.parse(e.postData.contents);
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const postsSheet = ss.getSheetByName('Posts');
+    const postsSheet = ss.getSheetByName(POSTS_SHEET_NAME);
     // シートが存在しない場合はエラーを返す
     if (!postsSheet) {
       throw new Error('Posts sheet not found.');
@@ -537,7 +565,7 @@ function deleteAllPostsData(
   }
 
   try {
-    const sheetName = 'Posts';
+    const sheetName = POSTS_SHEET_NAME;
     const startRow = 2; // 2行目 (B2セルから)
     const startColumn = 2; // 2列目 (B列から)
     const requestBody: RDPostData = JSON.parse(e.postData.contents);
@@ -600,7 +628,7 @@ function getPostsData(
 ): GoogleAppsScript.Content.TextOutput {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    let postsSheet = ss.getSheetByName('Posts');
+    let postsSheet = ss.getSheetByName(POSTS_SHEET_NAME);
 
     // シートが存在しない場合は作成し、ヘッダー行を追加
     if (!postsSheet) {
@@ -625,6 +653,86 @@ function getPostsData(
       JSON.stringify({
         status: 'error',
         message: `Failed to get posts data. ${error}`,
+        error: error.toString(),
+      })
+    ).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+/**
+ * メディアファイルをGoogle Driveにアップロードする
+ * @param {object} e リクエストパラメータ
+ * @returns {GoogleAppsScript.Content.TextOutput} レスポンス
+ */
+function uploadMediaFile(
+  e: GoogleAppsScript.Events.DoPost
+): GoogleAppsScript.Content.TextOutput {
+  try {
+    const requestBody: XMediaFileData = JSON.parse(e.postData.contents);
+
+    if (
+      !requestBody.xMediaFileData ||
+      !Array.isArray(requestBody.xMediaFileData)
+    ) {
+      throw new Error('Request body must contain xMediaFileData array.');
+    }
+
+    const mediaData = requestBody.xMediaFileData[0];
+    const { filename, filedata, mimeType } = mediaData;
+
+    if (!filename || !filedata || !mimeType) {
+      throw new Error(
+        'Missing required fields (filename, filedata, mimeType).'
+      );
+    }
+
+    // Google Driveのルートフォルダを取得
+    const rootFolder = DriveApp.getRootFolder();
+
+    // フォルダ名
+    const folderName = 'X_Post_MediaFiles';
+
+    // フォルダが存在するか確認
+    let folder = DriveApp.getFoldersByName(folderName);
+    let mediaFolder;
+
+    if (folder.hasNext()) {
+      mediaFolder = folder.next();
+    } else {
+      // フォルダが存在しない場合は作成
+      mediaFolder = DriveApp.createFolder(folderName);
+    }
+
+    // ファイル名が重複する場合、連番を追加
+    let newFilename = filename;
+    let counter = 1;
+    while (mediaFolder.getFilesByName(newFilename).hasNext()) {
+      const fileExtension = filename.slice(filename.lastIndexOf('.'));
+      const baseFilename = filename.slice(0, filename.lastIndexOf('.'));
+      newFilename = `${baseFilename}_${counter}${fileExtension}`;
+      counter++;
+    }
+
+    // Base64データをBlobに変換
+    const decodedData = Utilities.base64Decode(filedata);
+    const blob = Utilities.newBlob(decodedData, mimeType, newFilename);
+
+    // ファイルをGoogle Driveに保存
+    const file = mediaFolder.createFile(blob);
+
+    return ContentService.createTextOutput(
+      JSON.stringify({
+        status: 'success',
+        message: 'Media file uploaded successfully.',
+        fileUrl: file.getUrl(),
+      })
+    ).setMimeType(ContentService.MimeType.JSON);
+  } catch (error: any) {
+    Logger.log(`Error uploading media file: ${error}`);
+    return ContentService.createTextOutput(
+      JSON.stringify({
+        status: 'error',
+        message: `Failed to upload media file. ${error}`,
         error: error.toString(),
       })
     ).setMimeType(ContentService.MimeType.JSON);

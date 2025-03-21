@@ -13,6 +13,13 @@ The library allows you to manage X posts through a Google Sheet, scheduling post
 - **Media Upload:** Uploads media files from Google Drive to X.
 - **Trigger Management:** Creates and deletes time-based triggers to automate the posting process.
 
+## Additional Features
+
+- **Concurrency Control:** Uses CacheService to prevent duplicate posting attempts within a short period.
+- **Posted & Errors Sheets:** Automatically moves successfully posted entries to the "Posted" sheet and logs errors in the "Errors" sheet, providing clear tracking.
+- **Error Handling:** Detailed error logs, plus optional emailed error reports.
+- **Media Upload Enhancement:** Now supports direct file-to-media uploads from Google Drive, with improved MIME type checks.
+
 ## File Descriptions
 
 ### `api.ts`
