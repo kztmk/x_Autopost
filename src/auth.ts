@@ -10,7 +10,7 @@
  * @param {object} params OAuthパラメータ
  * @return {string} 署名ベース文字列
  */
-function generateSignatureBaseString(method, url, params) {
+export function generateSignatureBaseString(method, url, params) {
   const sortedParams = Object.keys(params)
     .sort()
     .map((key) => `${key}=${encodeURIComponent(params[key])}`)
@@ -26,7 +26,7 @@ function generateSignatureBaseString(method, url, params) {
  * @param {string} signingKey 署名キー
  * @return {string} 署名 (Base64エンコード済み)
  */
-function generateSignature(signatureBaseString, signingKey) {
+export function generateSignature(signatureBaseString, signingKey) {
   // @ts-ignore  //
   const signature = Utilities.computeHmacSha1Signature(
     signatureBaseString,
@@ -41,7 +41,7 @@ function generateSignature(signatureBaseString, signingKey) {
  * @param {string} accountId 取得したいaccountId
  * @return {object} accountIdに紐づくapiKey, apiKeySecret, apiAccessToken, apiAccessTokenSecret
  */
-function getAccountProperties(accountId) {
+export function getAccountProperties(accountId) {
   const scriptProperties = PropertiesService.getScriptProperties();
 
   const apiKey = scriptProperties.getProperty(`${accountId}_apiKey`);

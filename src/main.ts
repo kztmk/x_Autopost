@@ -1,6 +1,5 @@
 // main.js (メインロジック)
 import {
-  fetchWithRetries,
   isWithinOneMinute,
   logErrorToSheet,
   sendErrorEmail,
@@ -8,6 +7,13 @@ import {
 } from './utils';
 
 import { uploadMediaToX } from './media';
+
+import {
+  generateSignature,
+  generateSignatureBaseString,
+  getAccountProperties,
+} from './auth';
+
 // X API v2のエンドポイント (必要に応じて変更)
 const TWITTER_API_ENDPOINT = 'https://api.twitter.com/2/tweets';
 
@@ -120,9 +126,17 @@ async function autoPostToX() {
           : [];
 
         // リプライ先の投稿IDを取得 (inReplyToInternal がある場合)
-        const replyToPostId = inReplyToInternal
+        let replyToPostId = inReplyToInternal
           ? getReplyToPostId(postedSheet, inReplyToInternal as string)
           : null; // Postedシートから検索
+
+        // Postedシートにない場合には Posts シートから検索
+        if (!replyToPostId && inReplyToInternal) {
+          replyToPostId = getReplyToPostId(
+            postsSheet,
+            inReplyToInternal as string
+          );
+        }
 
         // X に投稿
         const response = await postTweet(
@@ -195,43 +209,69 @@ async function postTweet(
   replyToPostId: string | null,
   accountId: string
 ): Promise<any> {
-  const payload: any = {
-    text: content,
+  const { apiKey, apiKeySecret, apiAccessToken, apiAccessTokenSecret } =
+    getAccountProperties(accountId);
+
+  // 1. OAuthパラメーターの設定（ツイート投稿API V2）
+  const oauthParams = {
+    oauth_consumer_key: apiKey,
+    oauth_token: apiAccessToken,
+    oauth_signature_method: 'HMAC-SHA1',
+    oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
+    oauth_nonce: Utilities.base64Encode(
+      // @ts-ignore
+      Utilities.getSecureRandomBytes(32)
+    ).replace(/\W/g, ''), // ランダムなnonce値 (Base64エンコード)
+    oauth_version: '1.0',
   };
 
-  if (mediaIds && mediaIds.length > 0) {
-    payload.media = { media_ids: mediaIds };
-  }
+  // 2. リクエストボディ（ポスト API V２用）
+  const requestBody: any = {
+    text: Text,
+    media: { media_ids: mediaIds },
+  };
 
-  if (replyToPostId) {
-    payload.reply = { in_reply_to_tweet_id: replyToPostId }; // リプライ形式を修正
-  }
+  // 3. 署名キーの生成
+  const signingKey = `${encodeURIComponent(apiKeySecret)}&${encodeURIComponent(
+    apiAccessTokenSecret
+  )}`;
 
-  const authConfig = getAuthConfig(accountId); // accountId を渡す
-  if (!authConfig) {
-    throw new Error(
-      `No authentication information found for account: ${accountId}`
-    );
-  }
-  const bearerToken = authConfig[`${accountId.toLowerCase()}_bearerToken`];
+  // 4. 署名ベース文字列の生成 (ツイート投稿URLとOAuthパラメータを使用)
+  const signatureBaseString = generateSignatureBaseString(
+    'POST',
+    TWITTER_API_ENDPOINT,
+    oauthParams
+  ); // ツイート投稿URL, OAuth params のみ署名対象 (request body は署名対象外)
+  const oauthSignature = generateSignature(signatureBaseString, signingKey); // 署名を生成
 
-  const options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
-    method: 'post',
-    contentType: 'application/json',
+  // 5. OAuth認証ヘッダーの生成
+  // @ts-ignore
+  const authHeader = `OAuth ${Object.entries({
+    ...oauthParams,
+    oauth_signature: oauthSignature,
+  })
+    .map(([key, value]) => `${key}="${encodeURIComponent(value)}"`)
+    .join(', ')}`;
+
+  // 6. UrlFetchApp でツイート投稿 API v2 を実行
+  const options = {
+    method: 'POST',
     headers: {
-      Authorization: `Bearer ${bearerToken}`,
+      Authorization: authHeader,
+      'Content-Type': 'application/json', // ツイート投稿 API v2 は application/json
     },
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true, // エラーレスポンスも取得
+    payload: JSON.stringify(requestBody), // リクエストボディをJSON文字列に変換
   };
 
-  const response = fetchWithRetries(TWITTER_API_ENDPOINT, options);
-  if (response.getResponseCode() < 200 || response.getResponseCode() >= 300) {
-    throw new Error(
-      `Tweet post failed. Status code: ${response.getResponseCode()}, Response: ${response.getContentText()}`
-    );
+  try {
+    // @ts-ignore
+    const response = UrlFetchApp.fetch(tweetUrl, options); // APIリクエストを実行
+    const responseJson = JSON.parse(response.getContentText()); // レスポンスをJSONオブジェクトに変換
+    Logger.log(`ツイートが投稿されました:${responseJson.data.id}`); // ログ出力
+    return responseJson; // レスポンスを返す
+  } catch (error) {
+    Logger.log('ツイート投稿エラー:', error); // エラーログ出力
   }
-  return JSON.parse(response.getContentText());
 }
 
 /**

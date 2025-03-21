@@ -1,6 +1,10 @@
 // media.js (メディアアップロード)
-import { getAuthConfig } from './auth';
-import { fetchWithRetries, logErrorToSheet, sendErrorEmail } from './utils';
+import {
+  generateSignature,
+  generateSignatureBaseString,
+  getAccountProperties,
+} from './auth';
+import { logErrorToSheet, sendErrorEmail } from './utils';
 
 const TWITTER_MEDIA_UPLOAD_ENDPOINT =
   'https://upload.twitter.com/1.1/media/upload.json';
@@ -13,6 +17,26 @@ const SUPPORTED_MEDIA_TYPES: { [key: string]: string } = {
   'video/mp4': 'mp4',
   // 'video/quicktime': 'mov', // 状況により追加
 };
+
+/**
+ * Google DriveのファイルURLからファイルIDを取得する
+ * @param url
+ * @returns id or
+ */
+function getFileIdFromUrl(url) {
+  try {
+    const urlObj = new URL(url);
+    let fileId = urlObj.pathname.split('/')[3]; // 例: /file/d/ファイルID/view の場合、3番目の要素がファイルID
+    if (!fileId) {
+      // pathname から取得できない場合は、searchParams から id パラメータを探す
+      fileId = urlObj.searchParams.get('id');
+    }
+    return fileId;
+  } catch (e) {
+    // URLパースエラーの場合、またはファイルIDが見つからない場合は null を返す
+    return null;
+  }
+}
 
 /**
  * Google DriveのファイルをXにアップロードし、メディアIDの配列を返す。(チャンクアップロード)
@@ -28,10 +52,13 @@ export async function uploadMediaToX(
   const mediaIds: string[] = [];
   const urls = mediaUrls.split(',').filter((url) => url.trim() !== ''); // 空のURLを除外
 
+  const { apiKey, apiKeySecret, apiAccessToken, apiAccessTokenSecret } =
+    getAccountProperties(accountId);
+
   for (const url of urls) {
     let mediaId: string | null = null; // 各ファイルごとの mediaId
     try {
-      const fileId = url.match(/[-\w]{25,}/);
+      const fileId = getFileIdFromUrl(url);
       if (!fileId) {
         throw new Error(`Invalid Google Drive URL: ${url}`);
       }
@@ -45,58 +72,85 @@ export async function uploadMediaToX(
         throw new Error(`Unsupported media type: ${mediaType}`);
       }
 
-      // 1. INIT
-      mediaId = await initMediaUpload(fileSize, mediaType, accountId);
+      // blob
+      const blob = file.getBlob();
+      // BlobをBase64エンコード
+      const base64Data = Utilities.base64Encode(blob.getBytes());
 
-      // 2. APPEND (チャンクに分割してアップロード) 効率化のため UrlFetchApp.fetch を直接利用
-      const chunkSize = 5 * 1024 * 1024; // 5MBチャンク (Twitter APIの制限に合わせる)
+      // OAuthパラメータ作成のためheaerの情報を取得
+      //const authHeader = generateAuthHeader(accountId, TWITTER_MEDIA_UPLOAD_ENDPOINT);
 
-      // blobを直接扱わずFileオブジェクトからストリーム的に読み込む (効率化のため)
-      for (let offset = 0; offset < fileSize; offset += chunkSize) {
-        const chunkBlob = file
-          .getBlob()
-          .getDataAsString()
-          .substring(offset / 2, offset / 2 + chunkSize / 2); //getDataAsString().substringで効率化
-        const encodedChunk = Utilities.base64Encode(chunkBlob);
+      // OAuthパラメータ設定（メディアアップロード用）
+      const oauthParams = {
+        oauth_consumer_key: apiKey,
+        oauth_token: apiAccessToken,
+        oauth_signature_method: 'HMAC-SHA1',
+        oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
+        oauth_nonce: Utilities.base64Encode(
+          // @ts-ignore
+          Utilities.getSecureRandomBytes(32)
+        ).replace(/\W/g, ''),
+        oauth_version: '1.0',
+      };
 
-        const appendOptions: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions =
-          {
-            method: 'post',
-            headers: {
-              Authorization: `Bearer ${
-                getAuthConfig(accountId)[`${accountId}_bearerToken`]
-              }`, // accountId を渡す
-            },
-            payload: {
-              command: 'APPEND',
-              media_id: mediaId,
-              media_data: encodedChunk,
-              segment_index: offset / chunkSize,
-            },
-            muteHttpExceptions: true,
-          };
+      const uploadParams = {
+        media_data: base64Data,
+        ...oauthParams,
+      };
 
-        const appendResponse = fetchWithRetries(
+      // 署名キーの作成
+      const signingKey = `${encodeURIComponent(
+        apiKeySecret
+      )}&${encodeURIComponent(apiAccessTokenSecret)}`;
+
+      // 署名ベース文字列の生成
+      const signatureBaseString = generateSignatureBaseString(
+        'POST',
+        TWITTER_MEDIA_UPLOAD_ENDPOINT,
+        oauthParams
+      );
+      // 署名の生成
+      const oauthSignature = generateSignature(signatureBaseString, signingKey);
+      // OAuth認証ヘッダーの生成
+      // @ts-ignore
+      const authHeader = `OAuth ${Object.entries({
+        ...oauthParams,
+        oauth_signature: oauthSignature,
+      })
+        .map(([key, value]) => `${key}="${encodeURIComponent(value)}"`)
+        .join(', ')}`;
+
+      // UrlFetchApp でメディアアップロード API v1.1 を実行
+      const options = {
+        method: 'POST',
+        headers: {
+          Authorization: authHeader,
+          'Content-Type': 'application/x-www-form-urlencoded', // メディアアップロード API v1.1 は x-www-form-urlencoded
+        },
+        payload: uploadParams, // payload に uploadParams を指定 (UrlFetchApp が自動で x-www-form-urlencoded 形式に変換)
+      };
+
+      try {
+        const response = UrlFetchApp.fetch(
           TWITTER_MEDIA_UPLOAD_ENDPOINT,
-          appendOptions
-        );
-        const appendStatus = appendResponse.getResponseCode();
-        if (appendStatus < 200 || appendStatus >= 300) {
-          const errorText = appendResponse.getContentText();
-          throw new Error(
-            `APPEND failed (status ${appendStatus}): ${errorText}`
-          );
-        }
+          // @ts-ignore
+          options
+        ); // APIリクエストを実行
+        const json = response.getContentText(); // レスポンスをJSON文字列として取得
+        const data = JSON.parse(json); // JSON文字列をJavaScriptオブジェクトにパース
+        const mediaId = data.media_id_string; // media_id_string を取得 (メディアID)
         Logger.log(
-          `Uploaded ${offset + encodedChunk.length} / ${fileSize} bytes`
-        );
+          `URL "${url}" のファイルをアップロードしました。Media ID:`,
+          mediaId
+        ); // ログ出力
+        mediaIds.push(mediaId); // アップロードされたメディアIDを配列に追加
+      } catch (error) {
+        Logger.log(
+          `URL "${url}" のファイルのメディアアップロードエラー:`,
+          error
+        ); // エラーログ出力
+        throw error; // エラーをthrowして上位関数 (testUploadMediaAndTweet) で処理できるようにする (処理中断)
       }
-
-      // 3. FINALIZE
-      await finalizeMediaUpload(mediaId, accountId);
-
-      // 4. STATUS (処理完了まで待機)
-      await checkMediaStatus(mediaId, accountId);
 
       mediaIds.push(mediaId);
       Logger.log(`Media uploaded and finalized. Media ID: ${mediaId}`);
@@ -113,149 +167,4 @@ export async function uploadMediaToX(
   }
 
   return mediaIds;
-}
-
-/**
- * メディアアップロードを初期化 (INIT).
- * @param {number} fileSize
- * @param {string} mediaType
- * @param {string} accountId
- * @returns {Promise<string>} mediaId
- */
-async function initMediaUpload(
-  fileSize: number,
-  mediaType: string,
-  accountId: string
-): Promise<string> {
-  const initOptions: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
-    method: 'post',
-    headers: {
-      Authorization: `Bearer ${
-        getAuthConfig(accountId)[`${accountId}_bearerToken`]
-      }`, // accountId を渡す
-    },
-    payload: {
-      command: 'INIT',
-      total_bytes: fileSize,
-      media_type: mediaType,
-      media_category: 'tweet_image', // 必要に応じて (例: tweet_video, tweet_gif)
-    },
-    muteHttpExceptions: true, // エラー時もレスポンスを取得
-  };
-
-  const initResponse = fetchWithRetries(
-    TWITTER_MEDIA_UPLOAD_ENDPOINT,
-    initOptions
-  );
-  const initStatus = initResponse.getResponseCode();
-  if (initStatus < 200 || initStatus >= 300) {
-    const errorText = initResponse.getContentText();
-    throw new Error(`INIT failed (status ${initStatus}): ${errorText}`);
-  }
-
-  const initJson = JSON.parse(initResponse.getContentText());
-
-  if (!initJson.media_id_string) {
-    throw new Error(
-      `INIT failed: media_id_string not found in response. Response: ${initResponse.getContentText()}`
-    );
-  }
-  return initJson.media_id_string;
-}
-
-/**
- * メディアアップロードを完了 (FINALIZE).
- * @param {string} mediaId
- * @param {string} accountId
- * @returns {Promise<void>}
- */
-async function finalizeMediaUpload(
-  mediaId: string,
-  accountId: string
-): Promise<void> {
-  const finalizeOptions: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
-    method: 'post',
-    headers: {
-      Authorization: `Bearer ${
-        getAuthConfig(accountId)[`${accountId}_bearerToken`]
-      }`, // accountId を渡す
-    },
-    payload: {
-      command: 'FINALIZE',
-      media_id: mediaId,
-    },
-    muteHttpExceptions: true,
-  };
-
-  const finalizeResponse = fetchWithRetries(
-    TWITTER_MEDIA_UPLOAD_ENDPOINT,
-    finalizeOptions
-  );
-  const finalizeStatus = finalizeResponse.getResponseCode();
-  if (finalizeStatus < 200 || finalizeStatus >= 300) {
-    const errorText = finalizeResponse.getContentText();
-    throw new Error(`FINALIZE failed (status ${finalizeStatus}): ${errorText}`);
-  }
-}
-
-/**
- * メディアの処理状態を確認する (STATUS).
- *
- * @param {string} mediaId メディアID
- * @param {string} accountId アカウントID
- * @returns {Promise<void>}
- */
-async function checkMediaStatus(
-  mediaId: string,
-  accountId: string
-): Promise<void> {
-  let processingInfo: any = { state: 'pending' };
-  let checkAfterMs = 1000; // 初回は1秒後にチェック
-
-  while (
-    processingInfo.state === 'pending' ||
-    processingInfo.state === 'in_progress'
-  ) {
-    // GAS の await は Utilities.sleep() で代用
-    await new Promise((resolve) => Utilities.sleep(checkAfterMs));
-
-    const statusOptions: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
-      method: 'get',
-      headers: {
-        Authorization: `Bearer ${
-          getAuthConfig(accountId)[`${accountId}_bearerToken`]
-        }`, // accountId を渡す
-      },
-      muteHttpExceptions: true,
-    };
-
-    const statusResponse = fetchWithRetries(
-      `${TWITTER_MEDIA_UPLOAD_ENDPOINT}?command=STATUS&media_id=${mediaId}`,
-      statusOptions
-    );
-    const statusJson = JSON.parse(statusResponse.getContentText());
-
-    processingInfo = statusJson.processing_info;
-
-    if (!processingInfo) {
-      Logger.log(
-        `STATUS check: processing_info not found. Response: ${statusResponse.getContentText()}`
-      );
-      return; // 処理情報がない場合は終了 (エラーではない)
-    }
-
-    if (processingInfo.state === 'failed') {
-      throw new Error(
-        `Media processing failed: ${processingInfo.error.message}`
-      );
-    }
-
-    checkAfterMs = processingInfo.check_after_secs * 1000 || checkAfterMs * 2; // 指数バックオフ
-    Logger.log(
-      `Media processing status: ${processingInfo.state}, checking again in ${
-        checkAfterMs / 1000
-      } seconds`
-    );
-  }
-  Logger.log(`Media processing completed. state: ${processingInfo.state}`);
 }
