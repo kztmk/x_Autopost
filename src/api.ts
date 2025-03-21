@@ -407,7 +407,7 @@ function writePostsData(
       postsSheet = createPostsSheet(ss);
     }
 
-    const xPostsData = requestBody;
+    const xPostsData = requestBody.xPostsData;
 
     // データが配列であることを確認
     if (!Array.isArray(xPostsData)) {
