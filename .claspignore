@@ -1,15 +1,12 @@
-.git/
-dist/
-node_modules/
-src/
-tsconfig.json
-package*.json
-package-lock.json
-jest.config.js
-README.md
-appsscript.json
-.gitignore
-.clasp.json
-.claspignore
-.eslintrc.js
-.eslintignore
+# ignore all files...
+
+**/**
+
+# specify push files...
+
+!appsscript.json
+!api.js
+!auth.js
+!main.js
+!media.js
+!utils.js
