@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc",
     "deploy": "npm run build && npm run copy-dist && clasp push && npm run cleanup-dist-copy",
-    "copy-dist": "copyfiles -u  1 dist/**/*.js ./",
+    "copy-dist": "copyfiles -u 1 dist/*.js ./",
     "cleanup-dist-copy": "del-cli api.js auth.js main.js media.js utils.js"
   },
   "dependencies": {
