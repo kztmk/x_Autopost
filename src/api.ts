@@ -198,7 +198,7 @@ function createPostsSheet(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
 }
 
 /**
- * 認証情報をLibraryPropertyに保存する
+ * 認証情報をPropertyに保存する
  * @param {object} e リクエストパラメータ
  * interface XApiKey {
  *  accountId: string;
@@ -483,7 +483,7 @@ function deletePostsData(
 
       // id が一致する行を検索
       const lastRow = postsSheet.getLastRow();
-      const dataRange = postsSheet.getRange(2, 1, lastRow - 1, 1);
+      const dataRange = postsSheet.getRange(1, 1, lastRow - 1, 1);
       const data = dataRange.getValues();
       const rowNumber = data.indexOf(id.toString());
 
