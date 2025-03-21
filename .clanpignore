@@ -1,0 +1,16 @@
+.git/
+node_modules/
+src/  // TypeScript ファイルはアップロードしない
+tsconfig.json
+package*.json
+package-lock.json
+jest.config.js
+README.md
+appsscript.json
+.gitignore
+.clasp.json
+.claspignore
+.eslintrc.js
+.eslintignore
+dist/**/*.js.map  // ソースマップもアップロードしない
+dist/test
