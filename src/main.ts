@@ -17,17 +17,21 @@ import {
 // X API v2のエンドポイント (必要に応じて変更)
 const TWITTER_API_ENDPOINT = 'https://api.twitter.com/2/tweets';
 
+const POSTS_SHEET_NAME = 'Posts';
+const POSTED_SHEET_NAME = 'Posted';
+const ERRORS_SHEET_NAME = 'Errors';
+
 /**
  * 1分ごとに実行されるトリガー関数。
  */
 async function autoPostToX() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const postsSheet = ss.getSheetByName('Posts');
+  const postsSheet = ss.getSheetByName(POSTS_SHEET_NAME);
 
   // Postsシートが存在しない場合はエラーを記録して終了
   try {
     if (!postsSheet) {
-      throw new Error('The "Posts" sheet is missing!');
+      throw new Error(`The "${POSTS_SHEET_NAME}" sheet is missing!`);
     }
   } catch (e: any) {
     const context = e.message || 'Error initializing sheets';
@@ -38,8 +42,10 @@ async function autoPostToX() {
     return;
   }
 
-  const postedSheet = ss.getSheetByName('Posted') || ss.insertSheet('Posted'); // Postedシートがない場合は作成
-  const errorSheet = ss.getSheetByName('Errors') || ss.insertSheet('Errors'); // Errorsシートがない場合には作成
+  const postedSheet =
+    ss.getSheetByName(POSTED_SHEET_NAME) || ss.insertSheet(POSTED_SHEET_NAME); // Postedシートがない場合は作成
+  const errorSheet =
+    ss.getSheetByName(ERRORS_SHEET_NAME) || ss.insertSheet(ERRORS_SHEET_NAME); // Errorsシートがない場合には作成
 
   // Postedシートがからの場合ヘッダーを作成
   if (postedSheet.getLastRow() === 0) {

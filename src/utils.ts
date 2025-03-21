@@ -1,5 +1,8 @@
 // utils.js (ユーティリティ関数)
 
+const ERROR_SHEET_NAME = 'Errors';
+const GAS_X_AUTO_POST = '[X Auto Post:エラー報告]';
+
 /**
  * Postsシートを投稿時刻 (postSchedule) でソートする。
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet ソートするシート
@@ -37,7 +40,7 @@ export function sendErrorEmail(body: string, subject: string): void {
 
   MailApp.sendEmail({
     to: emailAddress,
-    subject: `[GAS: X Auto Post] ${subject}`,
+    subject: `${GAS_X_AUTO_POST} ${subject}`,
     body: body,
   });
 }
@@ -49,7 +52,8 @@ export function sendErrorEmail(body: string, subject: string): void {
  */
 export function logErrorToSheet(error: Error, context: string): void {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const errorSheet = ss.getSheetByName('Errors') || ss.insertSheet('Errors');
+  const errorSheet =
+    ss.getSheetByName(ERROR_SHEET_NAME) || ss.insertSheet(ERROR_SHEET_NAME);
 
   if (errorSheet.getLastRow() === 0) {
     errorSheet.appendRow([
