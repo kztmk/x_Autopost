@@ -5,8 +5,4 @@
 # specify push files...
 
 !appsscript.json
-!api.js
-!auth.js
-!main.js
-!media.js
-!utils.js
+!code.js
