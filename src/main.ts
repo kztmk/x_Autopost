@@ -17,11 +17,10 @@ import {
 import * as api from './api';
 import * as auth from './auth';
 import * as media from './media';
-import * as testApi from './test/testApi';
 import * as utils from './utils';
 
 // 各モジュールのエクスポートをグローバルに割り当てる
-Object.assign(globalThis, api, auth, media, testApi, utils);
+Object.assign(globalThis, api, auth, media, utils);
 
 // X API v2のエンドポイント (必要に応じて変更)
 const TWITTER_API_ENDPOINT = 'https://api.twitter.com/2/tweets';
