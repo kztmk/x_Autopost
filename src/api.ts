@@ -1,4 +1,5 @@
 // api.js (API として公開する関数)
+// api.tsの冒頭に追加
 
 interface XApiKey {
   accountId: string;
@@ -10,7 +11,6 @@ interface XApiKey {
 
 interface XAuthInfo {
   authInfo: XApiKey[];
-  functionName: 'writeAuthInfo';
 }
 
 interface XPostData {
@@ -24,20 +24,15 @@ interface XPostData {
 
 interface XPostsData {
   xPostsData: XPostData[];
-  functionName: 'writePostsData | deletePostsData';
 }
 
 interface XPostTrigger {
   interval: string;
-  functionName: 'createTrigger' | 'deleteTrigger';
 }
 
-interface RDPostData {
-  functionName: 'deleteAllPostsData' | 'getPostsData';
-}
+interface RDPostData {}
 
 interface XMediaFile {
-  functionName: 'uploadMediaFile';
   filename: string;
   filedata: string;
   mimeType: string;
@@ -115,8 +110,6 @@ interface XMediaFileData {
  * @returns {GoogleAppsScript.Content.TextOutput} レスポンス
  
  */
-
-import { createTimeBasedTrigger, deleteAllTriggers } from './main';
 
 const POSTS_SHEET_NAME = 'Posts';
 
@@ -241,7 +234,7 @@ function createPostsSheet(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
  *  functionName: 'writeAuthInfo';
  * }
  */
-function writeAuthInfo(
+export function writeAuthInfo(
   e: GoogleAppsScript.Events.DoPost
 ): GoogleAppsScript.Content.TextOutput {
   // ロックを取得 (同時実行制御)
@@ -327,7 +320,7 @@ function writeAuthInfo(
  * 認証情報をLibraryPropertyから削除する
  *
  */
-function clearAuthInfo(): GoogleAppsScript.Content.TextOutput {
+export function clearAuthInfo(): GoogleAppsScript.Content.TextOutput {
   // ロックを取得 (同時実行制御)
   const lock = LockService.getScriptLock();
   try {
@@ -382,7 +375,7 @@ function clearAuthInfo(): GoogleAppsScript.Content.TextOutput {
  *  xPostsData: XPostData[];
  * }
  */
-function writePostsData(
+export function writePostsData(
   e: GoogleAppsScript.Events.DoPost
 ): GoogleAppsScript.Content.TextOutput {
   // ロックを取得
@@ -474,7 +467,7 @@ function writePostsData(
  * interface XPostsData {  xPostsData: XPostData[];  functionName: 'writePostsData | deletePostsData';}
  * @returns {GoogleAppsScript.Content.TextOutput} レスポンス
  */
-function deletePostsData(
+export function deletePostsData(
   e: GoogleAppsScript.Events.DoPost
 ): GoogleAppsScript.Content.TextOutput {
   // ロックを取得
@@ -548,7 +541,7 @@ function deletePostsData(
  * @param {object} e リクエストパラメータ
  * @returns {GoogleAppsScript.Content.TextOutput} レスポンス
  */
-function deleteAllPostsData(
+export function deleteAllPostsData(
   e: GoogleAppsScript.Events.DoPost
 ): GoogleAppsScript.Content.TextOutput {
   // ロックを取得
@@ -623,7 +616,7 @@ function deleteAllPostsData(
  * @param {object} e リクエストパラメータ
  * @returns {GoogleAppsScript.Content.TextOutput} レスポンス
  */
-function getPostsData(
+export function getPostsData(
   e: GoogleAppsScript.Events.DoPost
 ): GoogleAppsScript.Content.TextOutput {
   try {
@@ -664,7 +657,7 @@ function getPostsData(
  * @param {object} e リクエストパラメータ
  * @returns {GoogleAppsScript.Content.TextOutput} レスポンス
  */
-function uploadMediaFile(
+export function uploadMediaFile(
   e: GoogleAppsScript.Events.DoPost
 ): GoogleAppsScript.Content.TextOutput {
   try {
@@ -737,4 +730,33 @@ function uploadMediaFile(
       })
     ).setMimeType(ContentService.MimeType.JSON);
   }
+}
+/**
+ * 時間ベースのトリガーを作成する。
+ * @param {number} intervalMinutes トリガーの間隔 (分)
+ */
+export function createTimeBasedTrigger(intervalMinutes: number): void {
+  // 既存のトリガーを削除 (必要に応じて)
+  deleteAllTriggers();
+
+  // 新しいトリガーを作成
+  ScriptApp.newTrigger('autoPostToX')
+    .timeBased()
+    .everyMinutes(intervalMinutes)
+    .create();
+
+  Logger.log(
+    `Created time-based trigger to run autoPostToX every ${intervalMinutes} minutes.`
+  );
+}
+
+/**
+ * すべてのトリガーを削除する
+ */
+export function deleteAllTriggers(): void {
+  const triggers = ScriptApp.getProjectTriggers();
+  for (const trigger of triggers) {
+    ScriptApp.deleteTrigger(trigger);
+  }
+  Logger.log('Deleted all project triggers');
 }

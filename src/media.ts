@@ -29,7 +29,7 @@ function getFileIdFromUrl(url) {
     let fileId = urlObj.pathname.split('/')[3]; // 例: /file/d/ファイルID/view の場合、3番目の要素がファイルID
     if (!fileId) {
       // pathname から取得できない場合は、searchParams から id パラメータを探す
-      fileId = urlObj.searchParams.get('id');
+      fileId = urlObj.searchParams.get('id') || '';
     }
     return fileId;
   } catch (e) {
@@ -54,6 +54,10 @@ export async function uploadMediaToX(
 
   const { apiKey, apiKeySecret, apiAccessToken, apiAccessTokenSecret } =
     getAccountProperties(accountId);
+
+  if (!apiKey || !apiKeySecret || !apiAccessToken || !apiAccessTokenSecret) {
+    throw new Error('APIキーまたはアクセストークンが設定されていません');
+  }
 
   for (const url of urls) {
     let mediaId: string | null = null; // 各ファイルごとの mediaId
@@ -151,8 +155,6 @@ export async function uploadMediaToX(
         ); // エラーログ出力
         throw error; // エラーをthrowして上位関数 (testUploadMediaAndTweet) で処理できるようにする (処理中断)
       }
-
-      mediaIds.push(mediaId);
       Logger.log(`Media uploaded and finalized. Media ID: ${mediaId}`);
     } catch (error: any) {
       const context = `Media Upload Error (URL: ${url}, Media ID: ${

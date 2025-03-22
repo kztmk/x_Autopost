@@ -79,7 +79,7 @@ export function fetchWithRetries(
   options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions,
   retries: number = 3
 ): GoogleAppsScript.URL_Fetch.HTTPResponse {
-  let response: GoogleAppsScript.URL_Fetch.HTTPResponse;
+  let response: GoogleAppsScript.URL_Fetch.HTTPResponse | undefined;
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       response = UrlFetchApp.fetch(url, options);
@@ -106,7 +106,7 @@ export function fetchWithRetries(
   }
   // すべてのリトライが失敗
   throw new Error(
-    `Request failed after multiple retries. Last response: ${response.getContentText()}`
+    `Request failed after multiple retries. Last response: ${response?.getContentText()}`
   );
 }
 

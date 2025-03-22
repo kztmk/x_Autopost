@@ -74,6 +74,10 @@ export function generateAuthHeader(accountId, xPostUrl) {
   const { apiKey, apiKeySecret, apiAccessToken, apiAccessTokenSecret } =
     getAccountProperties(accountId);
 
+  if (!apiKey || !apiKeySecret || !apiAccessToken || !apiAccessTokenSecret) {
+    throw new Error('APIキーまたはアクセストークンが設定されていません');
+  }
+
   const oauthParams = {
     oauth_consumer_key: apiKey,
     oauth_token: apiAccessToken,

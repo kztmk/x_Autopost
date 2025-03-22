@@ -1,22 +1,25 @@
 {
   "compilerOptions": {
-    "target": "ES5", // Apps Script の実行環境は ES5 互換
-    "module": "CommonJS", // Apps Script は CommonJS 形式をサポート (または "None" でも可)
+    "target": "ES2019", // Apps Script の実行環境は ES5 互換
+    "module": "None", // Apps Script は CommonJS 形式をサポート (または "None" でも可)
+    "moduleResolution": "node",
     "outDir": "./dist", // コンパイル後の JavaScript ファイル出力先 (例: dist フォルダ)
     "rootDir": "./src", // TypeScript ファイルの入力元ディレクトリ (例: src フォルダ。プロジェクトルート直下の場合は "." )
-    "sourceMap": true, // ソースマップを生成 (デバッグに便利)
     "esModuleInterop": true, // CommonJS モジュールと ES モジュール間の相互運用性のため
-    "noImplicitAny": false, // 暗黙的な 'any' 型を許可 (厳密な型チェックを後回しにする場合。最初は false でも可)
-    "strict": false, // 厳格な型チェックを OFF (最初は OFF でも可。徐々に true にすることを推奨)
-    "alwaysStrict": false, // 常に strict mode でコードを生成しない (Apps Script 環境に合わせる)
-    "removeComments": true, // コンパイル後のコメントを削除
     "forceConsistentCasingInFileNames": true, // ファイル名の大文字小文字を区別する
+    "strict": true, // 厳格な型チェックを ON
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "noEmitOnError": false,
+
+    "noImplicitAny": false, // 暗黙的な 'any' 型を許可 (厳密な型チェックを後回しにする場合。最初は false でも可)
+    "removeComments": true, // コンパイル後のコメントを削除
+
     "types": [
       "google-apps-script",
       "jest" // 追加: Jest の型定義を使用
     ], // Apps Script の型定義を使用
-    "lib": ["es2015", "dom"], //  追加: ES2015 (またはそれ以降) のライブラリ定義を含める
-    "skipLibCheck": true // 追加: 型定義のチェックをスキップ
+    "lib": ["es2015", "dom"] //  追加: ES2015 (またはそれ以降) のライブラリ定義を含める
   },
   "include": [
     "src/**/*.ts", // コンパイル対象の TypeScript ファイル (src フォルダ以下)

@@ -14,6 +14,15 @@ import {
   getAccountProperties,
 } from './auth';
 
+import * as api from './api';
+import * as auth from './auth';
+import * as media from './media';
+import * as testApi from './test/testApi';
+import * as utils from './utils';
+
+// 各モジュールのエクスポートをグローバルに割り当てる
+Object.assign(globalThis, api, auth, media, testApi, utils);
+
 // X API v2のエンドポイント (必要に応じて変更)
 const TWITTER_API_ENDPOINT = 'https://api.twitter.com/2/tweets';
 
@@ -218,6 +227,10 @@ async function postTweet(
   const { apiKey, apiKeySecret, apiAccessToken, apiAccessTokenSecret } =
     getAccountProperties(accountId);
 
+  if (!apiKey || !apiKeySecret || !apiAccessToken || !apiAccessTokenSecret) {
+    throw new Error('APIキーまたはアクセストークンが設定されていません');
+  }
+
   // 1. OAuthパラメーターの設定（ツイート投稿API V2）
   const oauthParams = {
     oauth_consumer_key: apiKey,
@@ -299,34 +312,4 @@ function getReplyToPostId(
     }
   }
   return null; // 見つからない場合
-}
-
-/**
- * 時間ベースのトリガーを作成する。
- * @param {number} intervalMinutes トリガーの間隔 (分)
- */
-export function createTimeBasedTrigger(intervalMinutes: number): void {
-  // 既存のトリガーを削除 (必要に応じて)
-  deleteAllTriggers();
-
-  // 新しいトリガーを作成
-  ScriptApp.newTrigger('autoPostToX')
-    .timeBased()
-    .everyMinutes(intervalMinutes)
-    .create();
-
-  Logger.log(
-    `Created time-based trigger to run autoPostToX every ${intervalMinutes} minutes.`
-  );
-}
-
-/**
- * すべてのトリガーを削除する
- */
-export function deleteAllTriggers(): void {
-  const triggers = ScriptApp.getProjectTriggers();
-  for (const trigger of triggers) {
-    ScriptApp.deleteTrigger(trigger);
-  }
-  Logger.log('Deleted all project triggers');
 }
