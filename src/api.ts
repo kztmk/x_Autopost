@@ -112,6 +112,8 @@ interface XMediaFileData {
  */
 
 const POSTS_SHEET_NAME = 'Posts';
+const ERRORS_SHEET_NAME = 'Errors';
+const POSTED_SHEET_NAME = 'Posted';
 
 /**
  * データの入出力をAPIとして公開する
@@ -181,6 +183,18 @@ function doPost(
 
     case 'uploadMediaFile':
       return uploadMediaFile(e);
+
+    case 'getErrorAll':
+      return getErrorAll(e);
+
+    case 'deleteErrorAll':
+      return deleteErrorAll(e);
+
+    case 'getPostedAll':
+      return getPostedAll(e);
+
+    case 'deletePostedAll':
+      return deletePostedAll(e);
 
     default:
       return ContentService.createTextOutput(
@@ -491,7 +505,7 @@ export function deletePostsData(
     if (!postsSheet) {
       throw new Error('Posts sheet not found.');
     }
-    const xPostsData = requestBody;
+    const xPostsData = requestBody.xPostsData;
 
     // データが配列であることを確認
     if (!Array.isArray(xPostsData)) {
@@ -503,14 +517,13 @@ export function deletePostsData(
       const { id } = postData;
 
       // id が一致する行を検索
-      const lastRow = postsSheet.getLastRow();
-      const dataRange = postsSheet.getRange(1, 1, lastRow - 1, 1);
-      const data = dataRange.getValues();
-      const rowNumber = data.indexOf(id.toString());
+      const columnA = postsSheet.getRange('A:A');
+      const textFinder = columnA.createTextFinder(id);
+      const rowNumber = textFinder.findNext()?.getRow();
 
-      if (rowNumber !== -1) {
+      if (rowNumber && rowNumber !== -1) {
         // id が一致する行を削除
-        postsSheet.deleteRow(rowNumber + 2); // ヘッダー行を考慮して +2
+        postsSheet.deleteRow(rowNumber);
       } else {
         Logger.log(`Error: Could not find row number for post ID ${id}`);
       }
@@ -560,7 +573,7 @@ export function deleteAllPostsData(
   try {
     const sheetName = POSTS_SHEET_NAME;
     const startRow = 2; // 2行目 (B2セルから)
-    const startColumn = 2; // 2列目 (B列から)
+    const startColumn = 1; // 2列目 (B列から)
     const requestBody: RDPostData = JSON.parse(e.postData.contents);
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const postsSheet = ss.getSheetByName(sheetName);
@@ -731,6 +744,161 @@ export function uploadMediaFile(
     ).setMimeType(ContentService.MimeType.JSON);
   }
 }
+
+/**
+ * Errorsシートの全データを取得する
+ * @param {object} e リクエストパラメータ
+ * @returns {GoogleAppsScript.Content.TextOutput} レスポンス
+ */
+export function getErrorAll(
+  e: GoogleAppsScript.Events.DoPost
+): GoogleAppsScript.Content.TextOutput {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const errorSheet = ss.getSheetByName(ERRORS_SHEET_NAME);
+    if (!errorSheet) {
+      throw new Error('Errors sheet not found.');
+    }
+    const lastRow = errorSheet.getLastRow();
+    const lastColumn = errorSheet.getLastColumn();
+    const data =
+      lastRow > 1
+        ? errorSheet.getRange(2, 1, lastRow - 1, lastColumn).getValues()
+        : [];
+    return ContentService.createTextOutput(
+      JSON.stringify({
+        status: 'success',
+        message: 'Errors data retrieved successfully.',
+        data: data,
+      })
+    ).setMimeType(ContentService.MimeType.JSON);
+  } catch (error: any) {
+    Logger.log(`Error retrieving errors data: ${error}`);
+    return ContentService.createTextOutput(
+      JSON.stringify({
+        status: 'error',
+        message: `Failed to retrieve errors data. ${error}`,
+        error: error.toString(),
+      })
+    ).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+/**
+ * Errorsシートの全データ（ヘッダー以降）を削除する
+ * @param {object} e リクエストパラメータ
+ * @returns {GoogleAppsScript.Content.TextOutput} レスポンス
+ */
+export function deleteErrorAll(
+  e: GoogleAppsScript.Events.DoPost
+): GoogleAppsScript.Content.TextOutput {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const errorSheet = ss.getSheetByName(ERRORS_SHEET_NAME);
+    if (!errorSheet) {
+      throw new Error('Errors sheet not found.');
+    }
+    const lastRow = errorSheet.getLastRow();
+    const lastColumn = errorSheet.getLastColumn();
+    if (lastRow > 1) {
+      // keep header row intact
+      errorSheet.getRange(2, 1, lastRow - 1, lastColumn).clearContent();
+    }
+    return ContentService.createTextOutput(
+      JSON.stringify({
+        status: 'success',
+        message: 'Errors data cleared successfully.',
+      })
+    ).setMimeType(ContentService.MimeType.JSON);
+  } catch (error: any) {
+    Logger.log(`Error clearing errors data: ${error}`);
+    return ContentService.createTextOutput(
+      JSON.stringify({
+        status: 'error',
+        message: `Failed to clear errors data. ${error}`,
+        error: error.toString(),
+      })
+    ).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+/**
+ * Postedシートの全データを取得する
+ * @param {object} e リクエストパラメータ
+ * @returns {GoogleAppsScript.Content.TextOutput} レスポンス
+ */
+export function getPostedAll(
+  e: GoogleAppsScript.Events.DoPost
+): GoogleAppsScript.Content.TextOutput {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const postedSheet = ss.getSheetByName(POSTED_SHEET_NAME);
+    if (!postedSheet) {
+      throw new Error('Posted sheet not found.');
+    }
+    const lastRow = postedSheet.getLastRow();
+    const lastColumn = postedSheet.getLastColumn();
+    // Exclude header row; if you prefer the header include it with getDataRange()
+    const data =
+      lastRow > 1
+        ? postedSheet.getRange(2, 1, lastRow - 1, lastColumn).getValues()
+        : [];
+    return ContentService.createTextOutput(
+      JSON.stringify({
+        status: 'success',
+        message: 'Posted data retrieved successfully.',
+        data: data,
+      })
+    ).setMimeType(ContentService.MimeType.JSON);
+  } catch (error: any) {
+    Logger.log(`Error retrieving posted data: ${error}`);
+    return ContentService.createTextOutput(
+      JSON.stringify({
+        status: 'error',
+        message: `Failed to retrieve posted data. ${error}`,
+        error: error.toString(),
+      })
+    ).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+/**
+ * Postedシートの全データ（ヘッダー以降）を削除する
+ * @param {object} e リクエストパラメータ
+ * @returns {GoogleAppsScript.Content.TextOutput} レスポンス
+ */
+export function deletePostedAll(
+  e: GoogleAppsScript.Events.DoPost
+): GoogleAppsScript.Content.TextOutput {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const postedSheet = ss.getSheetByName(POSTED_SHEET_NAME);
+    if (!postedSheet) {
+      throw new Error('Posted sheet not found.');
+    }
+    const lastRow = postedSheet.getLastRow();
+    const lastColumn = postedSheet.getLastColumn();
+    if (lastRow > 1) {
+      postedSheet.getRange(2, 1, lastRow - 1, lastColumn).clearContent();
+    }
+    return ContentService.createTextOutput(
+      JSON.stringify({
+        status: 'success',
+        message: 'Posted data cleared successfully.',
+      })
+    ).setMimeType(ContentService.MimeType.JSON);
+  } catch (error: any) {
+    Logger.log(`Error clearing posted data: ${error}`);
+    return ContentService.createTextOutput(
+      JSON.stringify({
+        status: 'error',
+        message: `Failed to clear posted data. ${error}`,
+        error: error.toString(),
+      })
+    ).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
 /**
  * 時間ベースのトリガーを作成する。
  * @param {number} intervalMinutes トリガーの間隔 (分)

@@ -6,10 +6,13 @@
   "license": "MIT",
   "scripts": {
     "build": "tsc --project tsconfig.json",
-    "bundle": "esbuild src/main.ts --bundle --format=iife --global-name=MyApp --outfile=dist/code.js;",
-    "deploy": "npm run copy-dist && clasp push && npm run cleanup-dist-copy",
+    "deploy": "npm run bundle && npm run modify && npm run push",
+    "bundle": "node esbuild.config.js",
+    "modify": "node modify-codejs.js",
+    "push": "npm run copy-dist && clasp push && npm run cleanup-dist-copy",
     "copy-dist": "copyfiles -u 1 dist/*.js ./",
-    "cleanup-dist-copy": "del-cli code.js"
+    "cleanup-dist-copy": "del-cli code.js",
+    "testgen": "del-cli src/test/testApi.js && tsc --project test-tsconfig.json"
   },
   "dependencies": {
     "@types/google-apps-script": "^1.0.97"
