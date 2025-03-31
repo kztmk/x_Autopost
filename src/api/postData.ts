@@ -1,4 +1,4 @@
-import { XPostData } from '../types';
+import { PostError, XPostData } from '../types';
 
 /**
  * 指定された投稿データを 'Posts' シートに新しい行として保存します。
@@ -385,5 +385,128 @@ function deletePostData(postDataToDelete) {
     }
   }
   
+/**
+ * 'Posted' シートに保存されている全ての投稿済みデータを取得します。
+ * @return {XPostData[]} 保存されている投稿済みデータオブジェクトの配列。データがない場合は空配列。
+ * @throws {Error} シートが見つからない場合。
+ */
+function fetchPostedData() {
+  const SHEET_NAME = 'Posted'; // 対象シート名を変更
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_NAME);
 
-export { createPostData, fetchPostData, updatePostData, deletePostData };
+  if (!sheet) {
+    // Postedシートがない場合もエラーとする（main.tsで作成されるはずだが念のため）
+    throw new Error(`Sheet "${SHEET_NAME}" not found.`);
+  }
+
+  const dataRange = sheet.getDataRange();
+  const values = dataRange.getValues();
+
+  // データがヘッダー行のみ、または全くない場合
+  if (values.length <= 1) {
+    Logger.log(`No data rows found in sheet "${SHEET_NAME}".`);
+    return []; // データ行がないので空配列を返す
+  }
+
+  // ヘッダー行を取得 (最初の行)
+  const headers = values[0].map(header => String(header).trim()); // ヘッダー名を文字列に変換し、前後の空白を削除
+
+  // データ行 (ヘッダーを除く) をオブジェクトの配列に変換
+  const postedDataList:XPostData[] = [];
+  for (let i = 1; i < values.length; i++) { // i = 1 から開始してヘッダー行をスキップ
+    const row = values[i];
+    const postedData: XPostData = {};
+
+    // ヘッダーに基づいてオブジェクトを構築
+    for (let j = 0; j < headers.length; j++) {
+      const header = headers[j];
+      // ヘッダー名が空でないことを確認
+      if (header) {
+        let value = (j < row.length) ? row[j] : ''; // 行に対応するデータがあれば取得、なければ空文字
+
+        // 特定の型変換が必要な場合はここに追加 (例: createdAt列がDateオブジェクトの場合)
+        if (header === 'createdAt' && value instanceof Date) {
+           value = value.toISOString();
+        } else if (header === 'postSchedule' && value instanceof Date) {
+           // postScheduleもDateオブジェクトの場合があるかもしれないので変換
+           value = value.toISOString();
+        }
+        postedData[header] = value;
+      }
+    }
+
+    // idフィールドが存在し、空でない行のみを結果に含める（任意）
+    if (postedData.id) {
+        postedDataList.push(postedData);
+    } else {
+        Logger.log(`Skipping row ${i + 1} in ${SHEET_NAME} due to missing or empty id.`);
+    }
+  }
+
+  Logger.log(`Fetched ${postedDataList.length} posted data entries from sheet "${SHEET_NAME}".`);
+  return postedDataList;
+}
+
+/**
+ * 'Errors' シートに記録されている全ての エラーデータを取得します。
+ * @return {object[]} 保存されているエラーデータオブジェクトの配列。データがない場合は空配列。
+ * @throws {Error} シートが見つからない場合。
+ */
+function fetchErrorData() {
+  const SHEET_NAME = 'Errors'; // 対象シート名を指定
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_NAME);
+
+  if (!sheet) {
+    // Errorsシートがない場合もエラーとする（main.tsで作成されるはずだが念のため）
+    throw new Error(`Sheet "${SHEET_NAME}" not found.`);
+  }
+
+  const dataRange = sheet.getDataRange();
+  const values = dataRange.getValues();
+
+  // データがヘッダー行のみ、または全くない場合
+  if (values.length <= 1) {
+    Logger.log(`No data rows found in sheet "${SHEET_NAME}".`);
+    return []; // データ行がないので空配列を返す
+  }
+
+  // ヘッダー行を取得 (最初の行)
+  // Errorsシートのヘッダーは main.ts で定義済み ['Timestamp', 'Context', 'Error Message', 'Stack Trace']
+  const headers = values[0].map(header => String(header).trim());
+
+  // データ行 (ヘッダーを除く) をオブジェクトの配列に変換
+  const errorDataList:PostError[] = [];
+  for (let i = 1; i < values.length; i++) { // i = 1 から開始してヘッダー行をスキップ
+    const row = values[i];
+    const errorData:PostError = {timestamp: '', context: '', message: '', stack: ''};
+
+    // ヘッダーに基づいてオブジェクトを構築
+    for (let j = 0; j < headers.length; j++) {
+      const header = headers[j];
+      // ヘッダー名が空でないことを確認
+      if (header) {
+        let value = (j < row.length) ? row[j] : ''; // 行に対応するデータがあれば取得、なければ空文字
+
+        // Timestamp列がDateオブジェクトの場合、ISO文字列に変換
+        if (header === 'Timestamp' && value instanceof Date) {
+           value = value.toISOString();
+        }
+        errorData[header] = value;
+      }
+    }
+    // エラーデータの場合、通常は空行を除外する必要はないが、
+    // Timestampが空でない行のみ含めるなどのフィルタリングは可能
+    if (errorData['Timestamp']) { // Timestampが存在する行のみを追加
+       errorDataList.push(errorData);
+    } else {
+       Logger.log(`Skipping row ${i + 1} in ${SHEET_NAME} due to missing Timestamp.`);
+    }
+  }
+
+  Logger.log(`Fetched ${errorDataList.length} error data entries from sheet "${SHEET_NAME}".`);
+  return errorDataList;
+}
+
+export { createPostData, fetchPostData, updatePostData, deletePostData, fetchPostedData, fetchErrorData };

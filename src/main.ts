@@ -4,30 +4,30 @@ import {
   logErrorToSheet,
   sendErrorEmail,
   sortPostsBySchedule,
-} from './utils';
+} from "./utils";
 
-import { uploadMediaToX } from './media';
+import { uploadMediaToX } from "./media";
 
 import {
   generateSignature,
   generateSignatureBaseString,
-  getAccountProperties,
-} from './auth';
+  getXAuthById,
+} from "./auth";
 
-import * as api from './api';
-import * as auth from './auth';
-import * as media from './media';
-import * as utils from './utils';
+import * as api from "./apiv2";
+import * as auth from "./auth";
+import * as media from "./media";
+import * as utils from "./utils";
 
 // 各モジュールのエクスポートをグローバルに割り当てる
 Object.assign(globalThis, api, auth, media, utils);
 
 // X API v2のエンドポイント (必要に応じて変更)
-const TWITTER_API_ENDPOINT = 'https://api.twitter.com/2/tweets';
+const TWITTER_API_ENDPOINT = "https://api.twitter.com/2/tweets";
 
-const POSTS_SHEET_NAME = 'Posts';
-const POSTED_SHEET_NAME = 'Posted';
-const ERRORS_SHEET_NAME = 'Errors';
+const POSTS_SHEET_NAME = "Posts";
+const POSTED_SHEET_NAME = "Posted";
+const ERRORS_SHEET_NAME = "Errors";
 
 /**
  * 1分ごとに実行されるトリガー関数。
@@ -42,11 +42,11 @@ async function autoPostToX() {
       throw new Error(`The "${POSTS_SHEET_NAME}" sheet is missing!`);
     }
   } catch (e: any) {
-    const context = e.message || 'Error initializing sheets';
+    const context = e.message || "Error initializing sheets";
     logErrorToSheet(e, context);
     const errorMessage = `${context}: ${e.message}`;
     Logger.log(errorMessage);
-    sendErrorEmail(errorMessage, 'Post Schedule Error'); // エラーメール送信
+    sendErrorEmail(errorMessage, "Post Schedule Error"); // エラーメール送信
     return;
   }
 
@@ -66,10 +66,10 @@ async function autoPostToX() {
   // Errorsシートがからの場合ヘッダーを作成
   if (errorSheet.getLastRow() === 0) {
     errorSheet.appendRow([
-      'Timestamp',
-      'Context',
-      'Error Message',
-      'Stack Trace',
+      "Timestamp",
+      "Context",
+      "Error Message",
+      "Stack Trace",
     ]);
   }
 
@@ -125,13 +125,13 @@ async function autoPostToX() {
       logErrorToSheet(e, context);
       const errorMessage = `${context}: ${e.message}`;
       Logger.log(errorMessage);
-      sendErrorEmail(errorMessage, 'Post Schedule Error'); // エラーメール送信
+      sendErrorEmail(errorMessage, "Post Schedule Error"); // エラーメール送信
       continue; // 次の投稿処理へ * returnでも良い
     }
 
     // 投稿予定時刻が現在時刻から1分以内かチェック *順番を入れ替え
     if (scheduleDate && isWithinOneMinute(now, scheduleDate) && !postId) {
-      cache.put(processingKey, 'true', 600); // 10分間有効 (処理完了時に削除) *ここ
+      cache.put(processingKey, "true", 600); // 10分間有効 (処理完了時に削除) *ここ
 
       try {
         // メディアIDを取得 (メディアがある場合)
@@ -191,14 +191,14 @@ async function autoPostToX() {
             response
           )}`;
           Logger.log(errorMessage);
-          sendErrorEmail(errorMessage, 'X Post Failed');
+          sendErrorEmail(errorMessage, "X Post Failed");
         }
       } catch (error: any) {
         const context = `X Post Error (Post ID: ${id})`;
         logErrorToSheet(error, context);
         const errorMessage = `${context}: ${error} \n\nStack Trace:\n ${error.stack}`;
         Logger.log(errorMessage);
-        sendErrorEmail(errorMessage, 'X Post Error');
+        sendErrorEmail(errorMessage, "X Post Error");
       } finally {
         cache.remove(processingKey); // 処理中フラグを削除 (エラー時も含む)
       }
@@ -224,23 +224,23 @@ async function postTweet(
   accountId: string
 ): Promise<any> {
   const { apiKey, apiKeySecret, apiAccessToken, apiAccessTokenSecret } =
-    getAccountProperties(accountId);
+    getXAuthById(accountId);
 
   if (!apiKey || !apiKeySecret || !apiAccessToken || !apiAccessTokenSecret) {
-    throw new Error('APIキーまたはアクセストークンが設定されていません');
+    throw new Error("APIキーまたはアクセストークンが設定されていません");
   }
 
   // 1. OAuthパラメーターの設定（ツイート投稿API V2）
   const oauthParams = {
     oauth_consumer_key: apiKey,
     oauth_token: apiAccessToken,
-    oauth_signature_method: 'HMAC-SHA1',
+    oauth_signature_method: "HMAC-SHA1",
     oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
     oauth_nonce: Utilities.base64Encode(
       // @ts-ignore
       Utilities.getSecureRandomBytes(32)
-    ).replace(/\W/g, ''), // ランダムなnonce値 (Base64エンコード)
-    oauth_version: '1.0',
+    ).replace(/\W/g, ""), // ランダムなnonce値 (Base64エンコード)
+    oauth_version: "1.0",
   };
 
   // 2. リクエストボディ（ポスト API V２用）
@@ -256,7 +256,7 @@ async function postTweet(
 
   // 4. 署名ベース文字列の生成 (ツイート投稿URLとOAuthパラメータを使用)
   const signatureBaseString = generateSignatureBaseString(
-    'POST',
+    "POST",
     TWITTER_API_ENDPOINT,
     oauthParams
   ); // ツイート投稿URL, OAuth params のみ署名対象 (request body は署名対象外)
@@ -269,14 +269,14 @@ async function postTweet(
     oauth_signature: oauthSignature,
   })
     .map(([key, value]) => `${key}="${encodeURIComponent(value)}"`)
-    .join(', ')}`;
+    .join(", ")}`;
 
   // 6. UrlFetchApp でツイート投稿 API v2 を実行
   const options = {
-    method: 'POST',
+    method: "POST",
     headers: {
       Authorization: authHeader,
-      'Content-Type': 'application/json', // ツイート投稿 API v2 は application/json
+      "Content-Type": "application/json", // ツイート投稿 API v2 は application/json
     },
     payload: JSON.stringify(requestBody), // リクエストボディをJSON文字列に変換
   };
@@ -288,7 +288,7 @@ async function postTweet(
     Logger.log(`ツイートが投稿されました:${responseJson.data.id}`); // ログ出力
     return responseJson; // レスポンスを返す
   } catch (error) {
-    Logger.log('ツイート投稿エラー:', error); // エラーログ出力
+    Logger.log("ツイート投稿エラー:", error); // エラーログ出力
   }
 }
 

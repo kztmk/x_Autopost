@@ -19,3 +19,11 @@ export interface XPostData {
 export interface TriggerProps {
   intervalMinuts: number;
 }
+
+export interface PostError {
+  timestamp: string;
+  context: string;
+  message: string;
+  stack: string;
+}
+

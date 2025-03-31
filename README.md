@@ -14,16 +14,19 @@ X Autopost is a scheduled posting system that allows you to prepare posts in adv
 - **Multiple Account Management**: Support for multiple X accounts
 - **Error Handling**: Comprehensive error logging to spreadsheet and email notifications
 - **REST API**: Full API support for integration with other services
+- **Archive System**: Archive posted content and errors to separate spreadsheets
 
 ## System Architecture
 
 The application consists of several modules:
 
-- **API Layer**: RESTful endpoints for external interaction
-- **Authentication**: X API OAuth 1.0a authentication handling
-- **Media Handling**: Upload and process media files
-- **Post Management**: Create, schedule, and track posts
-- **Error Handling**: Comprehensive logging and notification
+- **API Layer**: RESTful endpoints for external interaction (`apiv2.ts`)
+- **Authentication**: X API OAuth 1.0a authentication handling (`auth.ts`)
+- **Media Handling**: Upload and process media files (`media.ts`)
+- **Post Management**: Create, schedule, and track posts (`postData.ts`)
+- **Automated Posting**: Time-based triggers for scheduled posting (`main.ts`)
+- **Error Handling**: Comprehensive logging and notification (`utils.ts`)
+- **Archive System**: Archive functionality for history management (`archive.ts`)
 
 ## API Endpoints
 
@@ -31,26 +34,29 @@ The application consists of several modules:
 
 The system provides several POST endpoints accessible via `doPost()`:
 
-| Target    | Action   | Description                           |
-|-----------|----------|---------------------------------------|
-| `xauth`   | `create` | Create new X API authentication       |
-|           | `update` | Update existing authentication        |
-|           | `delete` | Delete authentication                 |
-| `postData`| `create` | Create new post                       |
-|           | `update` | Update existing post                  |
-|           | `delete` | Delete post                           |
-| `trigger` | `create` | Create time-based trigger             |
-|           | `delete` | Delete all triggers                   |
-| `media`   | `upload` | Upload media file                     |
+| Target     | Action   | Description                         |
+| ---------- | -------- | ----------------------------------- |
+| `xauth`    | `create` | Create new X API authentication     |
+|            | `update` | Update existing authentication      |
+|            | `delete` | Delete authentication               |
+| `postData` | `create` | Create new post                     |
+|            | `update` | Update existing post                |
+|            | `delete` | Delete post                         |
+| `trigger`  | `create` | Create time-based trigger           |
+|            | `delete` | Delete all triggers                 |
+| `media`    | `upload` | Upload media file                   |
+| `archive`  | -        | Archive "Posted" or "Errors" sheets |
 
 ### GET Endpoints
 
 The system provides several GET endpoints accessible via `doGet()`:
 
-| Target    | Action   | Description                           |
-|-----------|----------|---------------------------------------|
-| `xauth`   | `fetch`  | Fetch all X account IDs               |
-| `postData`| `fetch`  | Fetch all post data                   |
+| Target       | Action  | Description             |
+| ------------ | ------- | ----------------------- |
+| `xauth`      | `fetch` | Fetch all X account IDs |
+| `postData`   | `fetch` | Fetch all post data     |
+| `postedData` | `fetch` | Fetch all posted data   |
+| `errorData`  | `fetch` | Fetch all error data    |
 
 ## Data Structure
 
@@ -77,46 +83,64 @@ Authentication data includes:
 - `apiAccessToken`: X API access token
 - `apiAccessTokenSecret`: X API access token secret
 
-## Workflow
+## Automated Posting Workflow
 
-1. Posts are created and stored in the "Posts" sheet
-2. A time-based trigger runs `autoPostToX()` every minute
-3. The function checks for posts scheduled within the next minute
-4. Media is uploaded if necessary
-5. Posts are published to X using OAuth 1.0a authentication
-6. Published posts are moved to the "Posted" sheet
-7. Errors are logged to the "Errors" sheet
+1. The `autoPostToX()` function is triggered to run every minute via a time-based trigger
+2. It checks for posts scheduled within the next minute
+3. For each post due for publication:
+   - A cache system prevents duplicate processing
+   - Media is uploaded if attached to the post
+   - Reply relationships are resolved
+   - OAuth 1.0a authentication is used for X API requests
+   - The post is published using X API v2
+   - Published posts are moved from "Posts" to "Posted" sheet
+   - The sheet is sorted to maintain chronological order
 
 ## Error Handling
 
 The system has comprehensive error handling:
-- All errors are logged to the "Errors" sheet
-- Error notifications can be sent via email
+
+- All errors are logged to the "Errors" sheet with timestamp, context, message and stack trace
+- Error notifications can be sent via email using `sendErrorEmail()`
 - Each API request returns appropriate HTTP status codes in the response payload
+- Detailed error logs are maintained via the Logger service
 
 ## Google Drive Media Storage
 
 Media files are:
+
 1. Uploaded to a dedicated folder in Google Drive
-2. Automatically set to "anyone with the link can view"
-3. Converted to accessible URLs for embedding
+2. Automatically set to "anyone with the link can view" using Drive API
+3. Converted to accessible URLs for embedding in posts
+
+## Archive System
+
+The system includes an archive functionality that:
+
+1. Copies data from "Posted" or "Errors" sheets to a separate archive spreadsheet
+2. Creates or uses an existing archive file named "X_Posted_Archive"
+3. Names each archived sheet according to user specifications
+4. Maintains a complete historical record of all posted content
 
 ## Setup Instructions
 
 1. Create a new Google Apps Script project
 2. Set up Google Sheets with "Posts", "Posted", and "Errors" sheets
-3. Configure X API credentials
-4. Deploy as a web app
+3. Configure X API credentials using the xauth API endpoints
+4. Deploy as a web app with appropriate permissions
+5. Set up time-based triggers for the `autoPostToX()` function
 
 ## Security Considerations
 
 - OAuth credentials are securely stored using PropertiesService
-- API endpoints validate request data
+- API endpoints validate request data and handle errors gracefully
 - Media upload size is restricted to prevent abuse
+- Response includes status codes to indicate success or failure
 
 ## Dependencies
 
 - Google Apps Script
 - Google Sheets
-- Google Drive
+- Google Drive API v3 (advanced service)
 - X API v2
+- TypeScript
