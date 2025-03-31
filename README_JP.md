@@ -205,6 +205,7 @@ Apps Script のトリガーを管理します:
 
 - `createTimeBasedTrigger()`: 時間ベースのトリガーを作成
 - `deleteAllTriggers()`: すべてのトリガーを削除
+- `checkTriggerExists()`: 指定した関数のトリガーが存在するか確認
 
 ### 6.5 X 認証管理 (api/xauth.ts)
 
@@ -330,6 +331,14 @@ Content-Type: application/json
   "filename": "2025年3月投稿履歴"
 }
 ```
+
+### 9.5 トリガーの状態を確認する
+
+```http
+GET ?action=status&target=trigger&functionName=autoPostToX
+```
+
+指定された関数のトリガーが設定されているかどうかを確認できます。レスポンスには、関数名とトリガーの設定状況が含まれます。
 
 ## 10. エラーハンドリング
 
