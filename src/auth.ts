@@ -1,4 +1,5 @@
 // auth.ts (認証関連の関数)
+import { XAuthInfo } from "./types";
 
 // ** 🌟  ここに Google Drive の "X-mediaFiles" フォルダの ID を指定してください 🌟 **
 // const TEST_MEDIA_FOLDER_ID = 'YOUR_X_MEDIA_FILES_FOLDER_ID'; // 例: 'xxxxxxxxxxxxxxxxxxxxxxxxx'  <-  実際のフォルダIDに置き換えてください
@@ -36,31 +37,51 @@ export function generateSignature(signatureBaseString, signingKey) {
 }
 
 /**
- * accountIdを引数にLibrary PropertiesからaccountIdをプレフィックスに持つ4つの変数を取得する。
+ * 指定されたaccountIdに対応するXの認証情報をプロパティサービスから取得します。
  *
- * @param {string} accountId 取得したいaccountId
- * @return {object} accountIdに紐づくapiKey, apiKeySecret, apiAccessToken, apiAccessTokenSecret
+ * @param {string} accountId 取得対象のXアカウントID。
+ * @return {XAuthInfo} 見つかったXAuthInfoオブジェクト。
+ * @throws {Error} accountIdが指定されていない場合、対象のaccountIdに対応する情報が見つからない場合、
+ *                 またはプロパティの読み取り/パースに失敗した場合。
  */
-export function getAccountProperties(accountId) {
-  const scriptProperties = PropertiesService.getScriptProperties();
+export function getXAuthById(accountId) {
+  // accountId のバリデーション
+  if (!accountId || typeof accountId !== 'string' || accountId.trim() === '') {
+    throw new Error('Invalid or missing accountId provided.');
+  }
 
-  const apiKey = scriptProperties.getProperty(`${accountId}_apiKey`);
-  const apiKeySecret = scriptProperties.getProperty(
-    `${accountId}_apiKeySecret`
-  );
-  const apiAccessToken = scriptProperties.getProperty(
-    `${accountId}_apiAccessToken`
-  );
-  const apiAccessTokenSecret = scriptProperties.getProperty(
-    `${accountId}_apiAccessTokenSecret`
-  );
+  const properties = PropertiesService.getScriptProperties();
+  const propKey = `xauth_${accountId.trim()}`; // キーを生成 (念のためtrim)
 
-  return {
-    apiKey: apiKey,
-    apiKeySecret: apiKeySecret,
-    apiAccessToken: apiAccessToken,
-    apiAccessTokenSecret: apiAccessTokenSecret,
-  };
+  try {
+    const authInfoString = properties.getProperty(propKey);
+
+    // プロパティが存在しない場合
+    if (!authInfoString) {
+      throw new Error(`XAuthInfo for accountId '${accountId}' not found.`);
+    }
+
+    // JSON文字列をパースしてオブジェクトに変換
+    const authInfo = JSON.parse(authInfoString);
+
+    // パース結果がオブジェクトであることを念のため確認
+    if (typeof authInfo !== 'object' || authInfo === null) {
+        throw new Error(`Invalid data format found for accountId '${accountId}'.`);
+    }
+
+    Logger.log(`XAuthInfo retrieved for accountId: ${accountId}`);
+    return authInfo; // XAuthInfoオブジェクトを返す
+
+  } catch (e: any) {
+    // JSON.parseのエラーなどもここで捕捉される
+    Logger.log(`Error getting XAuthInfo for accountId ${accountId}: ${e}`);
+    // 元のエラーメッセージを含めて再スローするか、より汎用的なメッセージにする
+    if (e.message.includes('not found')) {
+         throw e; // 見つからないエラーはそのままスロー
+    } else {
+         throw new Error(`Failed to get or parse XAuthInfo for accountId ${accountId}: ${e.message}`);
+    }
+  }
 }
 
 /**
@@ -72,7 +93,7 @@ export function generateAuthHeader(accountId, xPostUrl) {
   // OAuthパラメータの取得
   // LibraryProperties から取得
   const { apiKey, apiKeySecret, apiAccessToken, apiAccessTokenSecret } =
-    getAccountProperties(accountId);
+    getXAuthById(accountId);
 
   if (!apiKey || !apiKeySecret || !apiAccessToken || !apiAccessTokenSecret) {
     throw new Error('APIキーまたはアクセストークンが設定されていません');

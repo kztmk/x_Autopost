@@ -2,7 +2,7 @@
 import {
   generateSignature,
   generateSignatureBaseString,
-  getAccountProperties,
+  getXAuthById,
 } from './auth';
 import { logErrorToSheet, sendErrorEmail } from './utils';
 
@@ -53,7 +53,7 @@ export async function uploadMediaToX(
   const urls = mediaUrls.split(',').filter((url) => url.trim() !== ''); // 空のURLを除外
 
   const { apiKey, apiKeySecret, apiAccessToken, apiAccessTokenSecret } =
-    getAccountProperties(accountId);
+    getXAuthById(accountId);
 
   if (!apiKey || !apiKeySecret || !apiAccessToken || !apiAccessTokenSecret) {
     throw new Error('APIキーまたはアクセストークンが設定されていません');

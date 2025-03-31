@@ -1,0 +1,21 @@
+ export interface XAuthInfo {
+   accountId: string;
+   apiKey: string;
+   apiKeySecret: string;
+   accessToken: string;
+   accessTokenSecret: string;
+ }
+
+export interface XPostData {
+   id?: string;
+   createdAt?: string;
+   postSchedule?: string;
+   postTo?: string;
+   contents?: string;
+   media?: string;
+   inReplyToInternal?: string;
+  }
+
+export interface TriggerProps {
+  intervalMinuts: number;
+}
