@@ -51,12 +51,13 @@ The system provides several POST endpoints accessible via `doPost()`:
 
 The system provides several GET endpoints accessible via `doGet()`:
 
-| Target       | Action  | Description             |
-| ------------ | ------- | ----------------------- |
-| `xauth`      | `fetch` | Fetch all X account IDs |
-| `postData`   | `fetch` | Fetch all post data     |
-| `postedData` | `fetch` | Fetch all posted data   |
-| `errorData`  | `fetch` | Fetch all error data    |
+| Target       | Action   | Description                              |
+| ------------ | -------- | ---------------------------------------- |
+| `xauth`      | `fetch`  | Fetch all X account IDs                  |
+| `postData`   | `fetch`  | Fetch all post data                      |
+| `postedData` | `fetch`  | Fetch all posted data                    |
+| `errorData`  | `fetch`  | Fetch all error data                     |
+| `trigger`    | `status` | Check if a trigger exists for a function |
 
 ## Data Structure
 
@@ -129,6 +130,18 @@ The system includes an archive functionality that:
 3. Configure X API credentials using the xauth API endpoints
 4. Deploy as a web app with appropriate permissions
 5. Set up time-based triggers for the `autoPostToX()` function
+
+## Trigger Management
+
+The system provides functions to manage Google Apps Script triggers:
+
+- Create time-based triggers with specified interval
+- Delete all existing triggers
+- Check if a trigger exists for a specific function:
+  ```
+  GET ?action=status&target=trigger&functionName=autoPostToX
+  ```
+  Returns information about whether the specified function has an active trigger.
 
 ## Security Considerations
 

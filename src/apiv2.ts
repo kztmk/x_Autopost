@@ -12,7 +12,11 @@ import {
   fetchPostedData,
   fetchErrorData,
 } from "./api/postData";
-import { createTimeBasedTrigger, deleteAllTriggers } from "./api/triggers";
+import {
+  checkTriggerExists,
+  createTimeBasedTrigger,
+  deleteAllTriggers,
+} from "./api/triggers";
 import { uploadMediaFile } from "./api/media";
 import { archiveSheet } from "./api/archive";
 import { XAuthInfo, XPostData, PostError, TriggerProps } from "./types";
@@ -278,6 +282,28 @@ function doGet(e) {
             statusCode = 400;
             throw new Error(
               `Invalid action '${action}' for target 'errorData' in GET request`
+            );
+        }
+        break;
+
+      case "trigger":
+        switch (action) {
+          case "status":
+            const functionName = e.parameter.functionName; // 確認したい関数名をパラメータで受け取る
+            if (!functionName) {
+              statusCode = 400;
+              throw new Error("Missing required parameter: functionName.");
+            }
+            const exists = checkTriggerExists(functionName);
+            response = {
+              functionName: functionName,
+              isTriggerConfigured: exists, // トリガーが設定されているかどうか
+            };
+            break;
+          default:
+            statusCode = 400;
+            throw new Error(
+              `Invalid action '${action}' for target 'trigger' in GET request`
             );
         }
         break;
