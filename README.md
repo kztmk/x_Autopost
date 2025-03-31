@@ -1,133 +1,122 @@
-# xAutoPostLibrary
+# X Autopost
 
-This library provides functionality to schedule and automatically post content to X (formerly Twitter) using Google Sheets and Google Apps Script.
+An automated social media posting system for X (formerly Twitter) built with Google Apps Script and TypeScript.
 
 ## Overview
 
-The library allows you to manage X posts through a Google Sheet, scheduling posts for specific times. It leverages the X API to post content, including text and media, at the designated times.
+X Autopost is a scheduled posting system that allows you to prepare posts in advance and have them automatically published at specified times. The system uses Google Sheets as a database for post management and supports media uploads, thread replies, and multiple account handling.
 
-## Core Features
+## Features
 
-- **X Account Authentication:** Manages and stores authentication information for X accounts.
-- **Scheduled Posting:** Reads post information from a Google Sheet and posts to X at the scheduled time.
-- **Media Upload:** Uploads media files from Google Drive to X.
-- **Trigger Management:** Creates and deletes time-based triggers to automate the posting process.
+- **Scheduled Posting**: Schedule posts for specific dates and times
+- **Media Support**: Upload and attach images to your posts
+- **Thread Creation**: Create threaded replies to your own posts
+- **Multiple Account Management**: Support for multiple X accounts
+- **Error Handling**: Comprehensive error logging to spreadsheet and email notifications
+- **REST API**: Full API support for integration with other services
 
-## Additional Features
+## System Architecture
 
-- **Concurrency Control:** Uses CacheService to prevent duplicate posting attempts within a short period.
-- **Posted & Errors Sheets:** Automatically moves successfully posted entries to the "Posted" sheet and logs errors in the "Errors" sheet, providing clear tracking.
-- **Error Handling:** Detailed error logs, plus optional emailed error reports.
-- **Media Upload Enhancement:** Now supports direct file-to-media uploads from Google Drive, with improved MIME type checks.
+The application consists of several modules:
 
-## File Descriptions
+- **API Layer**: RESTful endpoints for external interaction
+- **Authentication**: X API OAuth 1.0a authentication handling
+- **Media Handling**: Upload and process media files
+- **Post Management**: Create, schedule, and track posts
+- **Error Handling**: Comprehensive logging and notification
 
-### `api.ts`
+## API Endpoints
 
-This file defines the API functions that are exposed by the library. These functions are accessible via `doPost` and handle various operations based on the `functionName` parameter in the request.
+### POST Endpoints
 
-- **`doPost(e: GoogleAppsScript.Events.DoPost)`:** Main function to handle incoming POST requests. It routes requests to different functions based on the `functionName` parameter.
-- **`deployAsWebApp(): string`:** Returns the URL of the deployed web app.
-- **`createPostsSheet(ss: GoogleAppsScript.Spreadsheet.Spreadsheet)`:** Creates a "Posts" sheet in the spreadsheet with predefined headers.
-- **`writeAuthInfo(e: GoogleAppsScript.Events.DoPost)`:** Stores X authentication information in the Library Properties.
-- **`clearAuthInfo(): GoogleAppsScript.Content.TextOutput`:** Clears X authentication information from the Library Properties.
-- **`writePostsData(e: GoogleAppsScript.Events.DoPost)`:** Writes post data to the "Posts" sheet.
-- **`deletePostsData(e: GoogleAppsScript.Events.DoPost)`:** Deletes post data from the "Posts" sheet based on the provided IDs.
-- **`deleteAllPostsData(e: GoogleAppsScript.Events.DoPost)`:** Deletes all post data from the "Posts" sheet.
-- **`getPostsData(e: GoogleAppsScript.Events.DoPost)`:** Retrieves post data from the "Posts" sheet.
+The system provides several POST endpoints accessible via `doPost()`:
 
-### `auth.ts`
+| Target    | Action   | Description                           |
+|-----------|----------|---------------------------------------|
+| `xauth`   | `create` | Create new X API authentication       |
+|           | `update` | Update existing authentication        |
+|           | `delete` | Delete authentication                 |
+| `postData`| `create` | Create new post                       |
+|           | `update` | Update existing post                  |
+|           | `delete` | Delete post                           |
+| `trigger` | `create` | Create time-based trigger             |
+|           | `delete` | Delete all triggers                   |
+| `media`   | `upload` | Upload media file                     |
 
-This file contains functions related to X authentication and token management.
+### GET Endpoints
 
-- **`getAccessToken(accountId: string, clientId: string): string`:** Retrieves the access token for the specified account. If the token is expired, it refreshes it.
-- **`refreshAccessToken(accountId: string, clientId: string): string`:** Refreshes the access token using the refresh token.
-- **`postTweetByBearerToken(content: string, mediaIds: string[], replyToPostId: string | null, accountId: string, clientId: string): any`:** Posts a tweet to X using a bearer token.
-- **`storeTokens(accountId: string, accessToken: string, refreshToken: string, expiresAt: number): void`:** Stores the provided tokens in the script properties.
+The system provides several GET endpoints accessible via `doGet()`:
 
-### `main.ts`
+| Target    | Action   | Description                           |
+|-----------|----------|---------------------------------------|
+| `xauth`   | `fetch`  | Fetch all X account IDs               |
+| `postData`| `fetch`  | Fetch all post data                   |
 
-This file contains the main logic for automating the posting process.
+## Data Structure
 
-- **`autoPostToX(): Promise<void>`:** Main function that runs every minute to check for scheduled posts and post them to X.
-- **`postTweet(content: string, mediaIds: string[], replyToPostId: string | null, accountId: string): Promise<any>`:** Posts a tweet to X using the provided content, media IDs, and reply-to post ID.
-- **`getReplyToPostId(sheet: GoogleAppsScript.Spreadsheet.Sheet, inReplyToInternal: string): string | null`:** Retrieves the post ID of a reply from the sheet.
-- **`createTimeBasedTrigger(intervalMinutes: number): void`:** Creates a time-based trigger to run the `autoPostToX` function every `intervalMinutes`.
-- **`deleteAllTriggers(): void`:** Deletes all triggers associated with the script.
+### Post Data
 
-### `media.ts`
+Posts are stored in Google Sheets with the following columns:
 
-This file handles media uploads to X.
+- `id`: Unique identifier for the post
+- `postSchedule`: Date and time for the scheduled post
+- `postTo`: X account ID to post from
+- `content`: Post content/text
+- `media`: Media URLs (comma-separated)
+- `inReplyToInternal`: ID of another post this is replying to
+- `postId`: X post ID after posting
+- `inReplyToOnX`: X post ID this is replying to
 
-- **`uploadMediaToX(mediaUrls: string, accountId: string): Promise<string[]>`:** Uploads media files from Google Drive to X and returns an array of media IDs.
-- **`initMediaUpload(fileSize: number, mediaType: string, accountId: string): Promise<string>`:** Initializes the media upload process.
-- **`finalizeMediaUpload(mediaId: string, accountId: string): Promise<void>`:** Finalizes the media upload process.
-- **`checkMediaStatus(mediaId: string, accountId: string): Promise<void>`:** Checks the processing status of the uploaded media.
+### X Authentication
 
-### `utils.ts`
+Authentication data includes:
 
-This file contains utility functions used throughout the library.
+- `accountId`: Unique identifier for the X account
+- `apiKey`: X API consumer key
+- `apiKeySecret`: X API consumer secret
+- `apiAccessToken`: X API access token
+- `apiAccessTokenSecret`: X API access token secret
 
-- **`sortPostsBySchedule(sheet: GoogleAppsScript.Spreadsheet.Sheet): void`:** Sorts the posts in the sheet by the scheduled time.
-- **`isWithinOneMinute(now: Date, scheduleDate: Date): boolean`:** Checks if a scheduled date is within one minute of the current time.
-- **`sendErrorEmail(body: string, subject: string): void`:** Sends an error email to the active user.
-- **`logErrorToSheet(error: Error, context: string): void`:** Logs an error to the "Errors" sheet in the spreadsheet.
-- **`fetchWithRetries(url: string, options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions, retries: number = 3): GoogleAppsScript.URL_Fetch.HTTPResponse`:** Fetches a URL with retry logic.
+## Workflow
 
-## Usage
+1. Posts are created and stored in the "Posts" sheet
+2. A time-based trigger runs `autoPostToX()` every minute
+3. The function checks for posts scheduled within the next minute
+4. Media is uploaded if necessary
+5. Posts are published to X using OAuth 1.0a authentication
+6. Published posts are moved to the "Posted" sheet
+7. Errors are logged to the "Errors" sheet
 
-1.  **Deploy as Library:** Deploy the script as a library in Google Apps Script.
-2.  **Create Google Sheet:** Create a Google Sheet to manage your X posts.
-3.  **Set up Authentication:** Use the API functions to store your X account authentication information.
-4.  **Schedule Posts:** Add post data to the "Posts" sheet, including the content, media URLs, and scheduled time.
-5.  **Create Trigger:** Use the API functions to create a time-based trigger to run the `autoPostToX` function.
+## Error Handling
 
-## Usage (Detailed)
+The system has comprehensive error handling:
+- All errors are logged to the "Errors" sheet
+- Error notifications can be sent via email
+- Each API request returns appropriate HTTP status codes in the response payload
 
-### 1. Deploy as Library
+## Google Drive Media Storage
 
-1.  In the Google Apps Script editor, go to "Deploy" > "New deployment".
-2.  Select "Library" as the type.
-3.  Set a version and description.
-4.  Click "Deploy".
-5.  Note the Script ID. You will need this to use the library in other projects.
+Media files are:
+1. Uploaded to a dedicated folder in Google Drive
+2. Automatically set to "anyone with the link can view"
+3. Converted to accessible URLs for embedding
 
-### 2. Enable the Library in Your Google Apps Script Project
+## Setup Instructions
 
-1.  Open your Google Apps Script project.
-2.  Go to "Editor".
-3.  Click the "Services" icon (looks like a "+" sign next to "Services").
-4.  Enter the Script ID of the library you deployed.
-5.  Click "Add".
-6.  You can now use the library in your project.
+1. Create a new Google Apps Script project
+2. Set up Google Sheets with "Posts", "Posted", and "Errors" sheets
+3. Configure X API credentials
+4. Deploy as a web app
 
-### 3. Sample Code
+## Security Considerations
 
-Here's an example of how to use the library to create a "Posts" sheet:
-
-```javascript
-// filepath: /path/to/your/script.gs
-function initializeSpreadsheet() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  xAutoPostLibrary.createPostsSheet(ss);
-}
-```
-
-And here's an example of how to trigger the auto post function:
-
-```javascript
-// filepath: /path/to/your/script.gs
-function createAutoPostTrigger() {
-  xAutoPostLibrary.createTimeBasedTrigger(1); // Run every 1 minute
-}
-```
+- OAuth credentials are securely stored using PropertiesService
+- API endpoints validate request data
+- Media upload size is restricted to prevent abuse
 
 ## Dependencies
 
 - Google Apps Script
 - Google Sheets
-- X API
-
-## License
-
-[MIT](LICENSE)
+- Google Drive
+- X API v2
