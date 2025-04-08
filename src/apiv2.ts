@@ -11,15 +11,22 @@ import {
   deletePostData,
   fetchPostedData,
   fetchErrorData,
+  updateMultiplePostSchedules,
+  deleteMultiplePostData,
 } from "./api/postData";
 import {
   checkTriggerExists,
   createTimeBasedTrigger,
   deleteAllTriggers,
 } from "./api/triggers";
-import { uploadMediaFile } from "./api/media";
 import { archiveSheet } from "./api/archive";
-import { XAuthInfo, XPostData, PostError, TriggerProps } from "./types";
+import {
+  XAuthInfo,
+  XPostData,
+  PostError,
+  TriggerProps,
+  PostScheduleUpdate,
+} from "./types";
 
 interface RequestData {
   [key: string]: any; // 任意のキーと値のペアを許可
@@ -129,6 +136,25 @@ function doPost(e) {
             case "delete":
               response = deletePostData(requestData);
               break;
+            case "updateSchedules":
+              if (!Array.isArray(requestData)) {
+                statusCode = 400; // Bad Request
+                throw new Error(
+                  "Request body must be an array of {id, postSchedule} objects for updateSchedules action."
+                );
+              }
+              const updates: PostScheduleUpdate[] = requestData;
+              response = updateMultiplePostSchedules(updates);
+              break;
+            case "deleteMultiple":
+              if (!Array.isArray(requestData)) {
+                statusCode = 400; // Bad Request
+                throw new Error(
+                  "Request body must be an array of {id} objects for deleteMultiple action."
+                );
+              }
+              response = deleteMultiplePostData(requestData);
+              break;
             default:
               statusCode = 400; // Bad Request
               throw new Error(
@@ -149,18 +175,6 @@ function doPost(e) {
             default:
               statusCode = 400; // Bad Request
               throw new Error(`Invalid target '${target}'`);
-          }
-          break;
-
-        case "media":
-          switch (action) {
-            case "upload":
-              response = uploadMediaFile(requestData);
-              statusCode = 201; // Created
-              break;
-            default:
-              statusCode = 400; // Bad Request
-              throw new Error(`Invalid action '${action}' for target 'media'`);
           }
           break;
 

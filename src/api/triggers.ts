@@ -152,30 +152,61 @@ export function checkTriggerExists(functionName) {
     throw new Error("Missing or invalid required parameter: functionName.");
   }
   functionName = functionName.trim();
-
+  let triggerFound = false;
+  let intervalMinites = -1;
   try {
+    let isTriggersExists = true;
     const triggers = ScriptApp.getProjectTriggers();
     if (triggers.length === 0) {
       Logger.log("No project triggers found.");
-      return false; // トリガーが一つもなければ false
+      isTriggersExists = false;
     }
 
-    for (const trigger of triggers) {
-      if (trigger.getHandlerFunction() === functionName) {
-        Logger.log(`Trigger found for function: ${functionName}`);
-        // オプション: トリガーのタイプなども確認する場合
-        // Logger.log(`Trigger type: ${trigger.getEventType()}, Source: ${trigger.getTriggerSource()}`);
-        return true; // 指定された関数を実行するトリガーが見つかった
+    if (isTriggersExists) {
+      Logger.log("Project triggers found.");
+
+      for (const trigger of triggers) {
+        if (trigger.getHandlerFunction() === functionName) {
+          Logger.log(`Trigger found for function: ${functionName}`);
+          // オプション: トリガーのタイプなども確認する場合
+          // Logger.log(`Trigger type: ${trigger.getEventType()}, Source: ${trigger.getTriggerSource()}`);
+          // 時間ベースのトリガーの場合、interval を取得する
+          if (trigger.getEventType() === ScriptApp.EventType.CLOCK) {
+            // @ts-ignore  trigger.getMinutes() が存在しないというエラーを回避
+            const interval = trigger.getMinutes();
+            Logger.log(`Trigger interval: ${interval} minutes`);
+            return interval; // 指定された関数を実行するトリガーが見つかった
+          }
+          return true; // 指定された関数を実行するトリガーが見つかった
+        }
       }
     }
 
     // ループで見つからなかった場合
-    Logger.log(`No trigger found specifically for function: ${functionName}`);
-    return false;
+    if (!triggerFound && isTriggersExists) {
+      Logger.log(`No trigger found for function: ${functionName}`);
+    }
+    return ContentService.createTextOutput(
+      JSON.stringify({
+        status: "success",
+        functionName: functionName,
+        triggerFound: triggerFound,
+        message: triggerFound
+          ? "Successfully found trigger".concat(functionName)
+          : "No trigger found",
+        intervalMinites: intervalMinites > -1 ? intervalMinites : -1, // 時間ベースのトリガーが見つかった場合のみ
+      })
+    ).setMimeType(ContentService.MimeType.JSON);
   } catch (e: any) {
     Logger.log(`Error checking triggers for function ${functionName}: ${e}`);
-    // ScriptApp.getProjectTriggers() でエラーが発生することは稀だが念のため
-    throw new Error(`Failed to check triggers: ${e.message}`);
+    // ScriptApp.getProjectTriggers() でエラーが発生することは稀だが念のたhrow new Error(`Failed to check triggers: ${e.message}`);
+    return ContentService.createTextOutput(
+      JSON.stringify({
+        status: "error",
+        message: `Failed to check triggers for function ${functionName}: ${e.message}`,
+        error: e.toString(),
+      })
+    ).setMimeType(ContentService.MimeType.JSON);
   }
 }
 

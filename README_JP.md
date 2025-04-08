@@ -19,7 +19,6 @@ X Autopost は、Google Apps Script と TypeScript を使用して構築され�
 ├── src/
 │   ├── api/
 │   │   ├── archive.ts     # アーカイブ機能
-│   │   ├── media.ts       # メディア処理
 │   │   ├── postData.ts    # 投稿データ管理
 │   │   ├── triggers.ts    # トリガー管理
 │   │   └── xauth.ts       # X 認証情報管理
@@ -83,6 +82,15 @@ export interface PostError {
 ```typescript
 export interface TriggerProps {
   intervalMinuts: number; // トリガー実行間隔（分）
+}
+```
+
+### 4.5 PostScheduleUpdate インターフェース
+
+```typescript
+export interface PostScheduleUpdate {
+  id: string; // 投稿の一意な識別子
+  postSchedule: string; // 更新する投稿予定日時
 }
 ```
 
@@ -184,11 +192,7 @@ Google Drive のメディアを X にアップロードし、メディア ID を
 
 `archiveSheet()` 関数を使用して、"Posted" または "Errors" シートのデータを別のスプレッドシートにコピーします。
 
-### 6.2 メディア処理 (api/media.ts)
-
-`uploadMediaFile()` 関数を使用して、メディアファイルを Google Drive にアップロードし、共有設定を行います。
-
-### 6.3 投稿データ管理 (api/postData.ts)
+### 6.2 投稿データ管理 (api/postData.ts)
 
 投稿データの CRUD 操作を提供します:
 
@@ -198,8 +202,10 @@ Google Drive のメディアを X にアップロードし、メディア ID を
 - `deletePostData()`: 投稿データを削除
 - `fetchPostedData()`: 投稿済みデータを取得
 - `fetchErrorData()`: エラーデータを取得
+- `updateMultiplePostSchedules()`: 複数の投稿スケジュールをまとめて更新
+- `deleteMultiplePostData()`: 複数の投稿データをまとめて削除
 
-### 6.4 トリガー管理 (api/triggers.ts)
+### 6.3 トリガー管理 (api/triggers.ts)
 
 Apps Script のトリガーを管理します:
 
@@ -207,7 +213,7 @@ Apps Script のトリガーを管理します:
 - `deleteAllTriggers()`: すべてのトリガーを削除
 - `checkTriggerExists()`: 指定した関数のトリガーが存在するか確認
 
-### 6.5 X 認証管理 (api/xauth.ts)
+### 6.4 X 認証管理 (api/xauth.ts)
 
 X API 認証情報を PropertiesService に安全に保存・管理します:
 
@@ -304,24 +310,37 @@ Content-Type: application/json
 }
 ```
 
-### 9.3 メディアをアップロードする
+### 9.3 複数の投稿スケジュールを更新する
 
 ```http
-POST ?action=upload&target=media
+POST ?action=updateSchedules&target=postData
 Content-Type: application/json
 
-{
-  "xMediaFileData": [
-    {
-      "filename": "image.jpg",
-      "filedata": "BASE64_ENCODED_DATA",
-      "mimeType": "image/jpeg"
-    }
-  ]
-}
+[
+  {
+    "id": "投稿ID_1",
+    "postSchedule": "2025-04-01T11:00:00Z"
+  },
+  {
+    "id": "投稿ID_2",
+    "postSchedule": "2025-04-01T12:00:00Z"
+  }
+]
 ```
 
-### 9.4 投稿済みデータをアーカイブする
+### 9.4 複数の投稿を削除する
+
+```http
+POST ?action=deleteMultiple&target=postData
+Content-Type: application/json
+
+[
+  { "id": "投稿ID_1" },
+  { "id": "投稿ID_2" }
+]
+```
+
+### 9.5 投稿済みデータをアーカイブする
 
 ```http
 POST ?action=archive&target=posted
@@ -332,7 +351,7 @@ Content-Type: application/json
 }
 ```
 
-### 9.5 トリガーの状態を確認する
+### 9.6 トリガーの状態を確認する
 
 ```http
 GET ?action=status&target=trigger&functionName=autoPostToX

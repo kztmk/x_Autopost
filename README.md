@@ -34,18 +34,19 @@ The application consists of several modules:
 
 The system provides several POST endpoints accessible via `doPost()`:
 
-| Target     | Action   | Description                         |
-| ---------- | -------- | ----------------------------------- |
-| `xauth`    | `create` | Create new X API authentication     |
-|            | `update` | Update existing authentication      |
-|            | `delete` | Delete authentication               |
-| `postData` | `create` | Create new post                     |
-|            | `update` | Update existing post                |
-|            | `delete` | Delete post                         |
-| `trigger`  | `create` | Create time-based trigger           |
-|            | `delete` | Delete all triggers                 |
-| `media`    | `upload` | Upload media file                   |
-| `archive`  | -        | Archive "Posted" or "Errors" sheets |
+| Target     | Action            | Description                         |
+| ---------- | ----------------- | ----------------------------------- |
+| `xauth`    | `create`          | Create new X API authentication     |
+|            | `update`          | Update existing authentication      |
+|            | `delete`          | Delete authentication               |
+| `postData` | `create`          | Create new post                     |
+|            | `update`          | Update existing post                |
+|            | `delete`          | Delete post                         |
+|            | `updateSchedules` | Update multiple post schedules      |
+|            | `deleteMultiple`  | Delete multiple posts               |
+| `trigger`  | `create`          | Create time-based trigger           |
+|            | `delete`          | Delete all triggers                 |
+| `archive`  | -                 | Archive "Posted" or "Errors" sheets |
 
 ### GET Endpoints
 
