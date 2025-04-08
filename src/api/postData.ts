@@ -621,7 +621,7 @@ function fetchErrorData() {
 /**
  * 'Posts' シートの複数行の postSchedule を一括で更新します。
  *
- * @param {PostScheduleUpdate[]} updates - 更新する投稿のIDと新しいpostScheduleの配列。
+ * @param {PostScheduleUpdate[]} updates - 更新する投稿のIDと新しいpostScheduleの配列, postScheduleが空欄の場合はクリア。
  * @return {UpdateResult[]} 各更新試行の結果の配列。
  * @throws {Error} シートが見つからない、ヘッダーがない、または予期せぬエラーが発生した場合。
  */
@@ -687,8 +687,14 @@ function updateMultiplePostSchedules(
     if (rowIndex !== undefined) {
       // 行が見つかった場合
       try {
+        const valueToSet =
+          newSchedule === "" ||
+          newSchedule === null ||
+          newSchedule === undefined
+            ? ""
+            : newSchedule;
         // values 配列内の該当セルの値を更新
-        values[rowIndex][postScheduleColumnIndex] = newSchedule;
+        values[rowIndex][postScheduleColumnIndex] = valueToSet;
         results.push({ id: targetId, status: "updated" });
         updateCount++;
       } catch (e: any) {
