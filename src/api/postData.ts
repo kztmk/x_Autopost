@@ -5,6 +5,7 @@ import {
   UpdateResult,
   PostDeletion,
   DeleteResult,
+  XPostDataInput,
 } from "../types";
 
 // シート名の定数
@@ -852,6 +853,90 @@ function deleteMultiplePostData(deletions: PostDeletion[]): DeleteResult[] {
   return results;
 }
 
+/**
+ * 複数の投稿データを 'Posts' シートに一括で作成します。
+ * 各データにユニークなIDと作成日時を付与します。
+ *
+ * @param {XPostDataInput[]} postsDataInput - 作成する投稿データの配列 (id, createdAtを含まない)。
+ * @return {XPostData[]} 作成された完全なXPostDataオブジェクト (id, createdAtを含む) の配列。
+ * @throws {Error} シートが見つからない、必須フィールドが不足している、または書き込みに失敗した場合。
+ */
+function createMultiplePosts(postsDataInput: XPostDataInput[]): XPostData[] {
+  // 共通関数を使用してシート取得または作成
+  const sheet = getOrCreateSheetWithHeaders(SHEETS.POSTS, HEADERS.POST_HEADERS);
+
+  // 入力データが空の場合は何もせずに終了
+  if (!postsDataInput || postsDataInput.length === 0) {
+    Logger.log("No data provided to create multiple posts.");
+    return [];
+  }
+
+  const createdPosts: XPostData[] = [];
+  const rowsData: any[][] = []; // シートに書き込むための二次元配列
+
+  // --- データ準備 ---
+  for (const postInput of postsDataInput) {
+    // 必須フィールドの簡易チェック (必要に応じてより厳密に)
+    if (!postInput.postTo || !postInput.contents) {
+      // エラーをスローするか、スキップしてログに残すかを選択
+      Logger.log(
+        `Skipping post due to missing required fields: postTo or contents. Input: ${JSON.stringify(
+          postInput
+        )}`
+      );
+      // results 配列のようなものに失敗情報を追加することもできる
+      continue; // この投稿はスキップ
+      // throw new Error(`Missing required fields (postTo or contents) in one of the input objects: ${JSON.stringify(postInput)}`);
+    }
+
+    const newId = Utilities.getUuid();
+    const createdAt = new Date();
+
+    // 完全なXPostDataオブジェクトを作成
+    const newPostData: XPostData = {
+      id: newId,
+      createdAt: createdAt.toISOString(),
+      postTo: postInput.postTo,
+      contents: postInput.contents,
+      media: postInput.media || "",
+      postSchedule: postInput.postSchedule || "", // postScheduleがない場合も空文字
+      inReplyToInternal: postInput.inReplytoInternal || "",
+    };
+
+    createdPosts.push(newPostData); // 戻り値用の配列に追加
+
+    // シート書き込み用の行データを作成 (ヘッダーの順番に合わせる)
+    const rowData = HEADERS.POST_HEADERS.map((header) => {
+      return newPostData[header as keyof XPostData] !== undefined
+        ? newPostData[header as keyof XPostData]
+        : "";
+    });
+    rowsData.push(rowData);
+  }
+
+  // --- シートへの一括書き込み ---
+  if (rowsData.length > 0) {
+    try {
+      const startRow = sheet.getLastRow() + 1; // 次の空行から書き込み開始
+      const numRows = rowsData.length;
+      const numCols = HEADERS.POST_HEADERS.length; // ヘッダーの列数
+
+      sheet.getRange(startRow, 1, numRows, numCols).setValues(rowsData);
+
+      Logger.log(`Successfully created ${rowsData.length} posts.`);
+    } catch (e: any) {
+      Logger.log(`Error creating multiple posts with setValues: ${e}`);
+      // Errorシートへの記録などを検討
+      throw new Error(`Failed to save multiple posts to sheet: ${e.message}`);
+    }
+  } else {
+    Logger.log("No valid posts data to write after validation.");
+  }
+
+  // 作成された完全なデータの配列を返す
+  return createdPosts;
+}
+
 export {
   createPostData,
   fetchPostData,
@@ -861,4 +946,5 @@ export {
   fetchErrorData,
   updateMultiplePostSchedules,
   deleteMultiplePostData,
+  createMultiplePosts,
 };

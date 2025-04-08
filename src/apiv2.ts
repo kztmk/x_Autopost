@@ -13,6 +13,7 @@ import {
   fetchErrorData,
   updateMultiplePostSchedules,
   deleteMultiplePostData,
+  createMultiplePosts,
 } from "./api/postData";
 import {
   checkTriggerExists,
@@ -26,6 +27,7 @@ import {
   PostError,
   TriggerProps,
   PostScheduleUpdate,
+  XPostDataInput,
 } from "./types";
 
 interface RequestData {
@@ -154,6 +156,17 @@ function doPost(e) {
                 );
               }
               response = deleteMultiplePostData(requestData);
+              break;
+            case "createMultiple":
+              if (!Array.isArray(requestData)) {
+                statusCode = 400; // Bad Request
+                throw new Error(
+                  "Request body must be an array of post data objects for createMultiple action."
+                );
+              }
+              const postDataArray: XPostDataInput[] = requestData;
+              response = createMultiplePosts(postDataArray);
+              statusCode = 201; // Created
               break;
             default:
               statusCode = 400; // Bad Request

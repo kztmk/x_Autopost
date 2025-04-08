@@ -48,3 +48,13 @@ export interface DeleteResult {
   status: "deleted" | "not_found" | "error";
   message?: string;
 }
+
+export interface XPostDataInput {
+  postTo: string;
+  contents: string;
+  media?: string;
+  postSchedule?: string; // 文字列形式を期待 (ISO 8601など)
+  inReplytoInternal?: string;
+  postId?: string;
+  inReplyToOnX?: string;
+}
