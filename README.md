@@ -44,6 +44,7 @@ The system provides several POST endpoints accessible via `doPost()`:
 |            | `delete`          | Delete post                         |
 |            | `updateSchedules` | Update multiple post schedules      |
 |            | `deleteMultiple`  | Delete multiple posts               |
+|            | `updateInReplyTo` | Update thread reply relationships   |
 | `trigger`  | `create`          | Create time-based trigger           |
 |            | `delete`          | Delete all triggers                 |
 | `archive`  | -                 | Archive "Posted" or "Errors" sheets |

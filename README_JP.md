@@ -204,6 +204,7 @@ Google Drive のメディアを X にアップロードし、メディア ID を
 - `fetchErrorData()`: エラーデータを取得
 - `updateMultiplePostSchedules()`: 複数の投稿スケジュールをまとめて更新
 - `deleteMultiplePostData()`: 複数の投稿データをまとめて削除
+- `updateInReplyTo()`: スレッド投稿のリプライ関係を一括更新
 
 ### 6.3 トリガー管理 (api/triggers.ts)
 

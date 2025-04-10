@@ -6,6 +6,7 @@ import {
   PostDeletion,
   DeleteResult,
   XPostDataInput,
+  UpdateInReplyToResult,
 } from "../types";
 
 // シート名の定数
@@ -696,15 +697,24 @@ function updateMultiplePostSchedules(
             : newSchedule;
         // values 配列内の該当セルの値を更新
         values[rowIndex][postScheduleColumnIndex] = valueToSet;
-        results.push({ id: targetId, status: "updated" });
+        results.push({
+          id: targetId,
+          status: "updated",
+          postSchedule: valueToSet,
+        });
         updateCount++;
       } catch (e: any) {
         Logger.log(`Error preparing update for ID "${targetId}": ${e}`);
-        results.push({ id: targetId, status: "error", message: e.message });
+        results.push({
+          id: targetId,
+          status: "error",
+          postSchedule: "",
+          message: e.message,
+        });
       }
     } else {
       // IDが見つからなかった場合
-      results.push({ id: targetId, status: "not_found" });
+      results.push({ id: targetId, status: "not_found", postSchedule: "" });
     }
   }
 
@@ -725,6 +735,115 @@ function updateMultiplePostSchedules(
     }
   } else {
     Logger.log("No matching IDs found to update.");
+  }
+
+  return results;
+}
+
+/**
+ * 複数の投稿の inReplyToInternal を一括更新します。
+ * スレッド投稿のリプライ関係を更新するために使用します。
+ *
+ * @param {Array<{id: string, inReplyToInternal: string}>} updateRequests - 更新するID と inReplyToInternal のペアの配列
+ * @return {Array<{id: string, status: string, message?: string}>} 各更新リクエストの結果
+ */
+function updateInReplyTo(updateRequests) {
+  // 共通関数を使用してシート取得または作成
+  const sheet = getOrCreateSheetWithHeaders(SHEETS.POSTS, HEADERS.POST_HEADERS);
+
+  // 更新リクエストの配列が有効かチェック
+  if (!Array.isArray(updateRequests) || updateRequests.length === 0) {
+    throw new Error("Invalid or empty update requests array.");
+  }
+
+  const dataRange = sheet.getDataRange();
+  const values = dataRange.getValues();
+
+  // ヘッダー行を取得し、列名とインデックスのマッピングを作成
+  if (values.length === 0) {
+    throw new Error(
+      `Sheet "${SHEETS.POSTS}" is empty or header row is missing.`
+    );
+  }
+
+  const headers = values[0].map((header) => String(header).trim());
+  const idColumnIndex = headers.indexOf("id");
+  const inReplyToInternalColumnIndex = headers.indexOf("inReplytoInternal");
+
+  // 必要な列が存在するか確認
+  if (idColumnIndex === -1) {
+    throw new Error('Cannot find "id" column in the sheet header.');
+  }
+  if (inReplyToInternalColumnIndex === -1) {
+    throw new Error(
+      'Cannot find "inReplytoInternal" column in the sheet header.'
+    );
+  }
+
+  // 各リクエストに対する結果を保持する配列
+  const results: UpdateInReplyToResult[] = [];
+
+  // 各更新リクエストを処理
+  for (const request of updateRequests) {
+    const { id, inReplyToInternal } = request;
+
+    // IDが提供されているかチェック
+    if (!id) {
+      results.push({
+        id: id || "unknown",
+        status: "error",
+        inReplyToInternal: "",
+        message: 'Missing required field "id" in update request.',
+      });
+      continue;
+    }
+
+    let rowIndex = -1;
+    // 対象IDを持つ行を探す
+    for (let i = 1; i < values.length; i++) {
+      const row = values[i];
+      if (row[idColumnIndex] === id) {
+        rowIndex = i;
+        break;
+      }
+    }
+
+    // 対象IDが見つからなかった場合
+    if (rowIndex === -1) {
+      results.push({
+        id: id,
+        status: "not_found",
+        inReplyToInternal: "",
+        message: `PostData with ID "${id}" not found.`,
+      });
+      continue;
+    }
+
+    try {
+      // inReplyToInternal フィールドを更新
+      sheet
+        .getRange(rowIndex + 1, inReplyToInternalColumnIndex + 1)
+        .setValue(inReplyToInternal || "");
+
+      results.push({
+        id: id,
+        status: "updated",
+        inReplyToInternal: inReplyToInternal || "",
+      });
+
+      Logger.log(
+        `inReplyToInternal for post with ID "${id}" updated successfully.`
+      );
+    } catch (e: any) {
+      results.push({
+        id: id,
+        status: "error",
+        inReplyToInternal: "",
+        message: `Error updating inReplyToInternal: ${e.message}`,
+      });
+
+      Logger.log(`Error updating inReplyToInternal for post ID "${id}": ${e}`);
+    }
   }
 
   return results;
@@ -947,4 +1066,5 @@ export {
   updateMultiplePostSchedules,
   deleteMultiplePostData,
   createMultiplePosts,
+  updateInReplyTo,
 };

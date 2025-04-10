@@ -36,6 +36,14 @@ export interface PostScheduleUpdate {
 export interface UpdateResult {
   id: string;
   status: "updated" | "not_found" | "error";
+  postSchedule: string;
+  message?: string;
+}
+
+export interface UpdateInReplyToResult {
+  id: string;
+  status: "updated" | "not_found" | "error";
+  inReplyToInternal: string;
   message?: string;
 }
 

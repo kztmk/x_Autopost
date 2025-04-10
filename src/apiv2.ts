@@ -14,6 +14,7 @@ import {
   updateMultiplePostSchedules,
   deleteMultiplePostData,
   createMultiplePosts,
+  updateInReplyTo,
 } from "./api/postData";
 import {
   checkTriggerExists,
@@ -139,34 +140,133 @@ function doPost(e) {
               response = deletePostData(requestData);
               break;
             case "updateSchedules":
-              if (!Array.isArray(requestData)) {
+              // 配列データの取得
+              let updatesArray;
+              if (
+                requestData.scheduleUpdates &&
+                Array.isArray(requestData.scheduleUpdates)
+              ) {
+                updatesArray = requestData.scheduleUpdates;
+              } else if (Array.isArray(requestData)) {
+                updatesArray = requestData;
+              } else {
                 statusCode = 400; // Bad Request
                 throw new Error(
-                  "Request body must be an array of {id, postSchedule} objects for updateSchedules action."
+                  `Request body must contain a scheduleUpdates array or be an array directly. Received: ${JSON.stringify(
+                    requestData
+                  )}`
                 );
               }
-              const updates: PostScheduleUpdate[] = requestData;
+
+              // 配列の各要素が必要なプロパティを持っているか確認
+              for (const update of updatesArray) {
+                if (!update.id || !(typeof update.postSchedule === "string")) {
+                  statusCode = 400;
+                  throw new Error(
+                    `Each update must have id and postSchedule properties. Invalid item: ${JSON.stringify(
+                      update
+                    )}`
+                  );
+                }
+              }
+
+              const updates: PostScheduleUpdate[] = updatesArray;
               response = updateMultiplePostSchedules(updates);
               break;
             case "deleteMultiple":
-              if (!Array.isArray(requestData)) {
+              // 配列データの取得
+              let deleteArray;
+              if (
+                requestData.idsToDelete &&
+                Array.isArray(requestData.idsToDelete)
+              ) {
+                deleteArray = requestData.idsToDelete;
+              } else if (Array.isArray(requestData)) {
+                deleteArray = requestData;
+              } else {
                 statusCode = 400; // Bad Request
                 throw new Error(
-                  "Request body must be an array of {id} objects for deleteMultiple action."
+                  `Request body must contain a deleteItems array or be an array directly. Received: ${JSON.stringify(
+                    requestData
+                  )}`
                 );
               }
-              response = deleteMultiplePostData(requestData);
+
+              // 配列の各要素が必要なプロパティを持っているか確認
+              for (const item of deleteArray) {
+                if (!item.id) {
+                  statusCode = 400;
+                  throw new Error(
+                    `Each item must have an id property. Invalid item: ${JSON.stringify(
+                      item
+                    )}`
+                  );
+                }
+              }
+
+              response = deleteMultiplePostData(deleteArray);
               break;
             case "createMultiple":
-              if (!Array.isArray(requestData)) {
+              // 配列データの取得
+              let createArray;
+              if (requestData.posts && Array.isArray(requestData.posts)) {
+                createArray = requestData.posts;
+              } else if (Array.isArray(requestData)) {
+                createArray = requestData;
+              } else {
                 statusCode = 400; // Bad Request
                 throw new Error(
-                  "Request body must be an array of post data objects for createMultiple action."
+                  `Request body must contain a posts array or be an array directly. Received: ${JSON.stringify(
+                    requestData
+                  )}`
                 );
               }
-              const postDataArray: XPostDataInput[] = requestData;
+
+              // 配列の各要素の基本検証（最低限のプロパティチェック）
+              for (const post of createArray) {
+                if (!post.postSchedule || !post.postTo || !post.contents) {
+                  statusCode = 400;
+                  throw new Error(
+                    `Each post must have postSchedule, postTo, and contents properties. Invalid post: ${JSON.stringify(
+                      post
+                    )}`
+                  );
+                }
+              }
+
+              const postDataArray: XPostDataInput[] = createArray;
               response = createMultiplePosts(postDataArray);
               statusCode = 201; // Created
+              break;
+            case "updateInReplyTo":
+              // 配列データの取得
+              let updateReplyArray;
+              if (requestData.updates && Array.isArray(requestData.updates)) {
+                updateReplyArray = requestData.updates;
+              } else if (Array.isArray(requestData)) {
+                updateReplyArray = requestData;
+              } else {
+                statusCode = 400; // Bad Request
+                throw new Error(
+                  `Request body must contain an updates array or be an array directly. Received: ${JSON.stringify(
+                    requestData
+                  )}`
+                );
+              }
+
+              // 配列の各要素が必要なプロパティを持っているか確認
+              for (const item of updateReplyArray) {
+                if (!item.id || typeof item.inReplyToInternal !== "string") {
+                  statusCode = 400;
+                  throw new Error(
+                    `Each update must have id and inReplyToInternal properties. Invalid item: ${JSON.stringify(
+                      item
+                    )}`
+                  );
+                }
+              }
+
+              response = updateInReplyTo(updateReplyArray);
               break;
             default:
               statusCode = 400; // Bad Request
