@@ -1,7 +1,7 @@
 // utils.js (ユーティリティ関数)
 
-const ERROR_SHEET_NAME = 'Errors';
-const GAS_X_AUTO_POST = '[X Auto Post:エラー報告]';
+const ERROR_SHEET_NAME = "Errors";
+const GAS_X_AUTO_POST = "[X Auto Post:エラー報告]";
 
 /**
  * Postsシートを投稿時刻 (postSchedule) でソートする。
@@ -15,18 +15,6 @@ export function sortPostsBySchedule(
       .getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn())
       .sort({ column: 2, ascending: true });
   }
-}
-
-/**
- * 2つの日付が1分以内かどうかをチェックする。
- *
- * @param {Date} date1
- * @param {Date} date2
- * @return {boolean} 1分以内なら true, そうでなければ false
- */
-export function isWithinOneMinute(now: Date, scheduleDate: Date): boolean {
-  const diff = scheduleDate.getTime() - now.getTime();
-  return diff > 0 && diff <= 60000; // 60000ミリ秒 = 1分
 }
 
 /**
@@ -57,10 +45,10 @@ export function logErrorToSheet(error: Error, context: string): void {
 
   if (errorSheet.getLastRow() === 0) {
     errorSheet.appendRow([
-      'Timestamp',
-      'Context',
-      'Error Message',
-      'Stack Trace',
+      "Timestamp",
+      "Context",
+      "Error Message",
+      "Stack Trace",
     ]);
   }
 
@@ -120,7 +108,7 @@ function handleRateLimiting(
 ): boolean {
   if (response.getResponseCode() === 429) {
     const headers = response.getHeaders();
-    const resetTime = parseInt(headers['x-rate-limit-reset'] as string, 10);
+    const resetTime = parseInt(headers["x-rate-limit-reset"] as string, 10);
 
     if (!isNaN(resetTime)) {
       // 待機時間 = リセット時間 - 現在時間 + 5秒 (余裕を持つ)

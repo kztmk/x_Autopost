@@ -1,11 +1,20 @@
+// --- PropertiesService を利用するための準備 ---
+const scriptProperties = PropertiesService.getScriptProperties();
+const TRIGGER_INTERVAL_PREFIX = "triggerInterval_"; // プロパティのキー接頭辞
+
 /**
  * 時間ベースのトリガーを作成する。既存の 'autoPostToX' トリガーは削除される。
- * @param {number} intervalMinutes トリガーの間隔 (分)。1以上の整数。
+ * トリガーIDと間隔を PropertiesService に保存する。
+ * @param {object} postData リクエストデータ。intervalMinutes プロパティを含む。
  * @returns {GoogleAppsScript.Content.TextOutput} JSONレスポンス
  */
 function createTimeBasedTrigger(postData) {
   const intervalMinutes = postData.intervalMinutes; // トリガーの間隔 (分)
-  var newTriggerId: string | null = null;
+  let newTriggerId: string | null = null;
+  const handlerFunction = "autoPostToX"; // トリガーで実行する関数名
+  let deletedExistingCount = 0;
+  const deletedTriggerIds: string[] = []; // 削除したトリガーIDを保持
+
   try {
     if (!Number.isInteger(intervalMinutes) || intervalMinutes < 1) {
       throw new Error(
@@ -13,66 +22,65 @@ function createTimeBasedTrigger(postData) {
       );
     }
 
-    var handlerFunction = "autoPostToX"; // トリガーで実行する関数名
-    var deletedExistingCount = 0;
-
-    // 既存の 'autoPostToX' ハンドラ関数を持つトリガーを削除
-    var triggers = ScriptApp.getProjectTriggers();
-    for (var _i = 0, triggers_1 = triggers; _i < triggers_1.length; _i++) {
-      var trigger = triggers_1[_i];
+    // 既存の 'autoPostToX' ハンドラ関数を持つトリガーを削除し、関連プロパティも削除
+    const triggers = ScriptApp.getProjectTriggers();
+    for (const trigger of triggers) {
       if (trigger.getHandlerFunction() === handlerFunction) {
-        var existingTriggerId = trigger.getUniqueId();
+        const existingTriggerId = trigger.getUniqueId();
+        deletedTriggerIds.push(existingTriggerId); // 削除対象IDを記録
         ScriptApp.deleteTrigger(trigger);
         deletedExistingCount++;
         Logger.log(
-          "Deleted existing trigger for "
-            .concat(handlerFunction, ": ")
-            .concat(existingTriggerId)
+          `Deleted existing trigger for ${handlerFunction}: ${existingTriggerId}`
         );
+        // 対応するプロパティも削除
+        const propertyKey = TRIGGER_INTERVAL_PREFIX + existingTriggerId;
+        if (scriptProperties.getProperty(propertyKey)) {
+          scriptProperties.deleteProperty(propertyKey);
+          Logger.log(`Deleted script property: ${propertyKey}`);
+        }
       }
     }
     Logger.log(
-      "Deleted "
-        .concat(
-          String(deletedExistingCount),
-          " existing trigger(s) for handler '"
-        )
-        .concat(handlerFunction, "'.")
+      `Deleted ${deletedExistingCount} existing trigger(s) for handler '${handlerFunction}'.`
     );
 
     // 新しいトリガーを作成
-    var newTrigger = ScriptApp.newTrigger(handlerFunction)
+    const newTrigger = ScriptApp.newTrigger(handlerFunction)
       .timeBased()
       .everyMinutes(intervalMinutes)
       .create();
     newTriggerId = newTrigger.getUniqueId();
+
+    // 新しいトリガーIDと間隔を PropertiesService に保存
+    const newPropertyKey = TRIGGER_INTERVAL_PREFIX + newTriggerId;
+    scriptProperties.setProperty(newPropertyKey, intervalMinutes.toString());
+
     Logger.log(
-      "Created new time-based trigger "
-        .concat(newTriggerId, " to run ")
-        .concat(handlerFunction, " every ")
-        .concat(intervalMinutes, " minutes.")
+      `Created new time-based trigger ${newTriggerId} to run ${handlerFunction} every ${intervalMinutes} minutes.`
     );
+    Logger.log(`Saved script property: ${newPropertyKey} = ${intervalMinutes}`);
 
     // 成功レスポンス
     return ContentService.createTextOutput(
       JSON.stringify({
         status: "success",
-        message: "Time-based trigger created successfully for '"
-          .concat(handlerFunction, "' to run every ")
-          .concat(intervalMinutes, " minutes."),
+        message: `Time-based trigger created successfully for '${handlerFunction}' to run every ${intervalMinutes} minutes.`,
         intervalMinutes: intervalMinutes,
         handlerFunction: handlerFunction,
         triggerId: newTriggerId,
         deletedExistingCount: deletedExistingCount,
+        deletedTriggerIds: deletedTriggerIds, // 削除したIDのリストも返す
       })
     ).setMimeType(ContentService.MimeType.JSON);
   } catch (error: any) {
-    Logger.log("Error creating time-based trigger: ".concat(error));
+    Logger.log(`Error creating time-based trigger: ${error}`);
     // エラーレスポンス
+    // Note: もしトリガー作成後にプロパティ保存で失敗した場合、トリガーは残る可能性がある
     return ContentService.createTextOutput(
       JSON.stringify({
         status: "error",
-        message: "Failed to create time-based trigger: ".concat(error.message),
+        message: `Failed to create time-based trigger: ${error.message}`,
         intervalMinutes: intervalMinutes, // エラー時も入力値を返す
         error: error.toString(),
         triggerId: newTriggerId, // 作成試行中にIDが取れていれば返す (通常はnull)
@@ -82,132 +90,178 @@ function createTimeBasedTrigger(postData) {
 }
 
 /**
- * プロジェクトの全てのトリガーを削除する
+ * プロジェクトの全てのトリガーを削除し、関連するプロパティも削除する
  * @returns {GoogleAppsScript.Content.TextOutput} JSONレスポンス
  */
 function deleteAllTriggers() {
-  var deletedCount = 0;
-  var triggerDetails: { id: string; handler: string }[] = [];
-  try {
-    var triggers = ScriptApp.getProjectTriggers();
-    deletedCount = triggers.length; // 削除対象の総数
+  let deletedCount = 0;
+  const deletedTriggerDetails: { id: string; handler: string }[] = [];
+  const deletedPropertyKeys: string[] = [];
 
-    if (deletedCount === 0) {
+  try {
+    const triggers = ScriptApp.getProjectTriggers();
+    const totalTriggers = triggers.length; // 削除対象の総数
+
+    if (totalTriggers === 0) {
       Logger.log("No project triggers found to delete.");
     } else {
-      for (var _i = 0, triggers_2 = triggers; _i < triggers_2.length; _i++) {
-        var trigger = triggers_2[_i];
-        var triggerId = trigger.getUniqueId();
-        var handler = trigger.getHandlerFunction();
-        triggerDetails.push({ id: triggerId, handler: handler }); // 削除前に情報を記録
+      Logger.log(`Found ${totalTriggers} trigger(s) to delete.`);
+      for (const trigger of triggers) {
+        const triggerId = trigger.getUniqueId();
+        const handler = trigger.getHandlerFunction();
+        deletedTriggerDetails.push({ id: triggerId, handler: handler }); // 削除前に情報を記録
+
+        // トリガーを削除
         ScriptApp.deleteTrigger(trigger);
-        // Logger.log("Deleted trigger: ".concat(triggerId, " (Handler: ").concat(handler, ")")); // 個別ログは冗長かも
+        deletedCount++;
+
+        // 対応するプロパティも削除
+        const propertyKey = TRIGGER_INTERVAL_PREFIX + triggerId;
+        if (scriptProperties.getProperty(propertyKey)) {
+          scriptProperties.deleteProperty(propertyKey);
+          deletedPropertyKeys.push(propertyKey);
+          Logger.log(`Deleted script property: ${propertyKey}`);
+        }
+        // Logger.log(`Deleted trigger: ${triggerId} (Handler: ${handler})`); // 個別ログ
       }
-      Logger.log(
-        "Successfully deleted ".concat(
-          String(deletedCount),
-          " project trigger(s)."
-        )
-      );
+      Logger.log(`Successfully deleted ${deletedCount} project trigger(s).`);
+      if (deletedPropertyKeys.length > 0) {
+        Logger.log(
+          `Deleted ${deletedPropertyKeys.length} related script properties.`
+        );
+      }
     }
 
     // 成功レスポンス
     return ContentService.createTextOutput(
       JSON.stringify({
         status: "success",
-        message: "Successfully deleted ".concat(
-          String(deletedCount),
-          " project trigger(s)."
-        ),
+        message: `Successfully deleted ${deletedCount} project trigger(s).`,
         deletedCount: deletedCount,
-        // deletedTriggers: triggerDetails // 削除したトリガーの詳細を含める場合
+        deletedTriggers: deletedTriggerDetails, // 削除したトリガーの詳細を含める
+        deletedPropertyKeys: deletedPropertyKeys, // 削除したプロパティキーのリスト
       })
     ).setMimeType(ContentService.MimeType.JSON);
   } catch (error: any) {
-    Logger.log("Error deleting all triggers: ".concat(error));
+    Logger.log(`Error deleting all triggers: ${error}`);
     // エラーレスポンス
     return ContentService.createTextOutput(
       JSON.stringify({
         status: "error",
-        message: "Failed to delete all triggers: ".concat(error.message),
-        deletedCount: deletedCount, // エラーまでに削除できた数（不正確かも）
+        message: `Failed to delete all triggers: ${error.message}`,
+        // エラー発生までに削除できたトリガーやプロパティに関する情報は部分的な可能性あり
+        partiallyDeletedCount: deletedCount,
+        partiallyDeletedTriggers: deletedTriggerDetails,
+        partiallyDeletedPropertyKeys: deletedPropertyKeys,
         error: error.toString(),
       })
     ).setMimeType(ContentService.MimeType.JSON);
   }
 }
 
+// --- checkTriggerExists 関数について ---
+// この関数は現在のところ PropertiesService を参照していません。
+// もしこの関数でもプロパティから間隔を取得したい場合は、以下のように修正できます。
+// ただし、`getMinutes()` メソッドは存在しないため、コメントアウトまたは削除し、
+// PropertiesService から取得するようにします。
+
 /**
- * 指定された関数名に紐づくプロジェクトトリガーが存在するかどうかを確認します。
+ * 指定された関数名に紐づくプロジェクトトリガーが存在するかどうか、
+ * および時間ベースの場合は PropertiesService から設定された間隔（分）を取得します。
  * @param {string} functionName 確認したい関数の名前 (例: 'autoPostToX')。
- * @return {boolean} 指定された関数を実行するトリガーが存在すれば true、なければ false。
- * @throws {Error} functionName が指定されていない場合。
+ * @return {GoogleAppsScript.Content.TextOutput} JSON形式のレスポンス。
  */
-export function checkTriggerExists(functionName) {
+function checkTriggerExists(functionName) {
   if (
     !functionName ||
     typeof functionName !== "string" ||
     functionName.trim() === ""
   ) {
-    throw new Error("Missing or invalid required parameter: functionName.");
+    // エラーの場合は例外ではなくJSONレスポンスを返す方が Web アプリとしては一般的
+    return ContentService.createTextOutput(
+      JSON.stringify({
+        status: "error",
+        message: "Missing or invalid required parameter: functionName.",
+        code: 400,
+      })
+    ).setMimeType(ContentService.MimeType.JSON);
+    // throw new Error("Missing or invalid required parameter: functionName.");
   }
   functionName = functionName.trim();
   let triggerFound = false;
-  let intervalMinites = -1;
+  let intervalMinutes: number | null = null; // 間隔（分）、見つからない場合は null
+  let foundTriggerId: string | null = null;
+
   try {
-    let isTriggersExists = true;
     const triggers = ScriptApp.getProjectTriggers();
     if (triggers.length === 0) {
       Logger.log("No project triggers found.");
-      isTriggersExists = false;
-    }
-
-    if (isTriggersExists) {
-      Logger.log("Project triggers found.");
+    } else {
+      Logger.log(`Checking ${triggers.length} project trigger(s)...`);
 
       for (const trigger of triggers) {
         if (trigger.getHandlerFunction() === functionName) {
-          Logger.log(`Trigger found for function: ${functionName}`);
-          // オプション: トリガーのタイプなども確認する場合
-          // Logger.log(`Trigger type: ${trigger.getEventType()}, Source: ${trigger.getTriggerSource()}`);
-          // 時間ベースのトリガーの場合、interval を取得する
+          triggerFound = true;
+          foundTriggerId = trigger.getUniqueId();
+          Logger.log(
+            `Trigger found for function: ${functionName} (ID: ${foundTriggerId})`
+          );
+
+          // 時間ベースのトリガーか確認
           if (trigger.getEventType() === ScriptApp.EventType.CLOCK) {
-            // @ts-ignore  trigger.getMinutes() が存在しないというエラーを回避
-            const interval = trigger.getMinutes();
-            Logger.log(`Trigger interval: ${interval} minutes`);
-            return interval; // 指定された関数を実行するトリガーが見つかった
+            // PropertiesService から間隔を取得
+            const propertyKey = TRIGGER_INTERVAL_PREFIX + foundTriggerId;
+            const intervalString = scriptProperties.getProperty(propertyKey);
+            if (intervalString) {
+              intervalMinutes = parseInt(intervalString, 10);
+              Logger.log(
+                `Found interval from properties (${propertyKey}): ${intervalMinutes} minutes`
+              );
+            } else {
+              Logger.log(
+                `Property key ${propertyKey} not found for trigger ${foundTriggerId}. Interval unknown.`
+              );
+              // プロパティがない場合の代替処理（例: intervalMinutes は null のままにする）
+            }
+          } else {
+            Logger.log(
+              `Trigger ${foundTriggerId} is not a time-based trigger.`
+            );
           }
-          return true; // 指定された関数を実行するトリガーが見つかった
+          break; // 最初に見つかったトリガーでチェック終了 (通常、同じハンドラ関数は1つのはず)
         }
       }
     }
 
-    // ループで見つからなかった場合
-    if (!triggerFound && isTriggersExists) {
+    if (!triggerFound && triggers.length > 0) {
       Logger.log(`No trigger found for function: ${functionName}`);
     }
+
+    // 成功レスポンス
     return ContentService.createTextOutput(
       JSON.stringify({
         status: "success",
         functionName: functionName,
         triggerFound: triggerFound,
+        triggerId: foundTriggerId, // 見つかったトリガーのID
+        intervalMinutes: intervalMinutes, // 時間ベースでプロパティが見つかった場合のみ数値、それ以外は null
         message: triggerFound
-          ? "Successfully found trigger".concat(functionName)
-          : "No trigger found",
-        intervalMinites: intervalMinites > -1 ? intervalMinites : -1, // 時間ベースのトリガーが見つかった場合のみ
+          ? `Trigger for function '${functionName}' found.`
+          : `No trigger found for function '${functionName}'.`,
+        code: 200,
       })
     ).setMimeType(ContentService.MimeType.JSON);
   } catch (e: any) {
     Logger.log(`Error checking triggers for function ${functionName}: ${e}`);
-    // ScriptApp.getProjectTriggers() でエラーが発生することは稀だが念のたhrow new Error(`Failed to check triggers: ${e.message}`);
     return ContentService.createTextOutput(
       JSON.stringify({
         status: "error",
         message: `Failed to check triggers for function ${functionName}: ${e.message}`,
         error: e.toString(),
+        code: 500, // Internal Server Error
       })
     ).setMimeType(ContentService.MimeType.JSON);
   }
 }
 
-export { createTimeBasedTrigger, deleteAllTriggers };
+export { createTimeBasedTrigger, deleteAllTriggers, checkTriggerExists };

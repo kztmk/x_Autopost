@@ -1,10 +1,5 @@
 // main.js (メインロジック)
-import {
-  isWithinOneMinute,
-  logErrorToSheet,
-  sendErrorEmail,
-  sortPostsBySchedule,
-} from "./utils";
+import { logErrorToSheet, sendErrorEmail, sortPostsBySchedule } from "./utils";
 
 import { uploadMediaToX } from "./media";
 
@@ -44,168 +39,328 @@ const MAIN_HEADERS = {
   ],
 };
 
+// --- PropertiesService と定数 (関数の外、または共通ライブラリで定義) ---
+const scriptProperties = PropertiesService.getScriptProperties();
+const TRIGGER_INTERVAL_PREFIX = "triggerInterval_"; // トリガー作成/削除時と合わせる
+const DEFAULT_TRIGGER_INTERVAL = 5; // プロパティが見つからない場合のデフォルト間隔 (分)
+const HANDLER_FUNCTION_NAME = "autoPostToX"; // 対象のハンドラ関数名
+
 /**
- * 1分ごとに実行されるトリガー関数。
+ * 現在実行中の指定されたハンドラ関数のトリガーの間隔（分）を PropertiesService から取得します。
+ * 見つからない場合や値が無効な場合はデフォルト値を返します。
+ * @param {string} functionName トリガーのハンドラ関数名
+ * @returns {number} トリガーの実行間隔 (分)
  */
+function getTriggerIntervalMinutes(functionName: string): number {
+  try {
+    const triggers = ScriptApp.getProjectTriggers();
+    for (const trigger of triggers) {
+      if (trigger.getHandlerFunction() === functionName) {
+        const triggerId = trigger.getUniqueId();
+        const propertyKey = TRIGGER_INTERVAL_PREFIX + triggerId;
+        const intervalString = scriptProperties.getProperty(propertyKey);
+        if (intervalString) {
+          const interval = parseInt(intervalString, 10);
+          if (!isNaN(interval) && interval > 0) {
+            Logger.log(
+              `Found trigger interval for ${functionName} (ID: ${triggerId}): ${interval} minutes from properties.`
+            );
+            return interval;
+          } else {
+            Logger.log(
+              `Invalid interval value found in properties for key ${propertyKey}: '${intervalString}'. Using default.`
+            );
+          }
+        } else {
+          // プロパティが存在しない場合（手動設定など）
+          Logger.log(
+            `Property key ${propertyKey} not found for trigger ${triggerId} handling ${functionName}. Using default interval.`
+          );
+        }
+        // 最初に見つかった該当ハンドラのトリガーを採用 (通常は1つのはず)
+        break;
+      }
+    }
+    // ループで見つからなかった場合（＝指定関数を実行するトリガーがない）
+    Logger.log(
+      `No active trigger found for handler function '${functionName}'. Using default interval.`
+    );
+  } catch (e: any) {
+    Logger.log(
+      `Error getting trigger interval for ${functionName}: ${e}. Using default interval.`
+    );
+  }
+  // デフォルト値を返す
+  Logger.log(
+    `Using default trigger interval: ${DEFAULT_TRIGGER_INTERVAL} minutes for ${functionName}.`
+  );
+  return DEFAULT_TRIGGER_INTERVAL;
+}
+
+// --- 修正後の autoPostToX 関数 ---
 async function autoPostToX() {
   try {
-    // 共通関数を使用してシート取得または作成
-    // Postsシートには標準のヘッダーを使用
+    // --- シート取得 (変更なし) ---
     const postsSheet = getOrCreateSheetWithHeaders(
       SHEETS.POSTS,
       HEADERS.POST_HEADERS
     );
-    // Postedシートにはmain.ts固有のヘッダーを使用（postedAt列を含む）
     const postedSheet = getOrCreateSheetWithHeaders(
       SHEETS.POSTED,
       MAIN_HEADERS.POSTED_HEADERS
     );
-    const errorSheet = getOrCreateSheetWithHeaders(
-      SHEETS.ERRORS,
-      HEADERS.ERROR_HEADERS
-    );
+    // const errorSheet = getOrCreateSheetWithHeaders(SHEETS.ERRORS, HEADERS.ERROR_HEADERS); // logErrorToSheet 内で処理
 
-    // Postsシートのデータを投稿時刻順にソート (B列で昇順ソート)
+    // --- Postsシートのソート (変更なし) ---
     sortPostsBySchedule(postsSheet);
 
     const now = new Date();
+    const nowTime = now.getTime();
 
-    // Postsシートのデータを取得 (ヘッダー行を除く)　と行番号をマッピング
+    // --- トリガー間隔と投稿閾値時刻の計算 ---
+    const triggerIntervalMinutes = getTriggerIntervalMinutes(
+      HANDLER_FUNCTION_NAME
+    );
+    const thresholdMinutes = triggerIntervalMinutes + 1; // トリガー間隔 + 1分
+    const thresholdTime = nowTime + thresholdMinutes * 60 * 1000; // 投稿対象とする未来の時刻上限
+    Logger.log(
+      `Current time: ${now.toISOString()}, Trigger Interval: ${triggerIntervalMinutes} min, Posting Threshold: Now + ${thresholdMinutes} min (${new Date(
+        thresholdTime
+      ).toISOString()})`
+    );
+
+    // --- Postsシートのデータ取得と行マッピング (変更なし) ---
     const postsData: any[][] = postsSheet.getDataRange().getValues().slice(1);
     const rowMapping: { [key: string]: number } = {};
-    for (let i = 0; i < postsData.length; i++) {
-      rowMapping[postsData[i][0] as string] = i + 2; // A列のIDをキー、行番号 (2始まり) を値とする
-    }
+    postsData.forEach((row, index) => {
+      if (row && row[0]) {
+        // IDが存在することを確認
+        rowMapping[row[0] as string] = index + 2; // A列のIDをキー、行番号 (2始まり) を値とする
+      }
+    });
+
+    // Postsシートのヘッダーインデックスを取得 (列の順序に依存しないように)
+    const postsHeaderMap = HEADERS.POST_HEADERS.reduce((map, header, index) => {
+      map[header] = index;
+      return map;
+    }, {} as { [key: string]: number });
+    const idIndex = postsHeaderMap[HEADERS.POST_HEADERS[0]]; // Assuming ID is the first header
+    const scheduleIndex = postsHeaderMap[HEADERS.POST_HEADERS[1]]; // Assuming Post Schedule is the second
+    const postToIndex = postsHeaderMap[HEADERS.POST_HEADERS[2]];
+    const contentIndex = postsHeaderMap[HEADERS.POST_HEADERS[3]];
+    const mediaUrlsIndex = postsHeaderMap[HEADERS.POST_HEADERS[4]];
+    const inReplyToInternalIndex = postsHeaderMap[HEADERS.POST_HEADERS[5]];
+    const postIdIndex = postsHeaderMap[HEADERS.POST_HEADERS[6]]; // 投稿済みIDの列
+    // const inReplyToOnXIndex = postsHeaderMap[HEADERS.POST_HEADERS[7]]; // Postsシートには基本的に無い想定だが念のため
 
     for (const postData of postsData) {
-      const [
-        id,
-        postSchedule,
-        postTo,
-        content,
-        mediaUrls,
-        inReplyToInternal,
-        postId,
-        inReplyToOnX,
-      ] = postData;
-      const accountId = (postTo as string).toLowerCase(); // 小文字に変換
-      let scheduleDate: Date;
+      // --- 各投稿データの取得 (インデックス使用) ---
+      const id = postData[idIndex] as string;
+      const postScheduleValue = postData[scheduleIndex];
+      const postTo = postData[postToIndex] as string;
+      const content = postData[contentIndex] as string;
+      const mediaUrls = postData[mediaUrlsIndex] as string;
+      const inReplyToInternal = postData[inReplyToInternalIndex] as string;
+      const postId = postData[postIdIndex] as string; // 投稿済みかどうかのチェック用
+      // const inReplyToOnX = postData[inReplyToOnXIndex]; // これはPostedシートで管理
 
-      // 投稿データ処理の開始を記録 (冪等性のため)
+      // --- IDがないデータはスキップ ---
+      if (!id) {
+        Logger.log(`Skipping row with missing ID.`);
+        continue;
+      }
+
+      const accountId = postTo ? postTo.toLowerCase() : ""; // アカウントID（小文字）
+      let scheduleDate: Date | null = null;
+
+      // --- 冪等性のためのキャッシュチェック (変更なし) ---
       const cache = CacheService.getScriptCache();
       const processingKey = `processing-${id}`;
-
-      // 処理中の投稿をチェック (冪等性) * 順番を入れ替え
       if (cache.get(processingKey)) {
         Logger.log(`Post ${id} is already being processed. Skipping.`);
         continue;
       }
 
+      // --- 1. 投稿済みチェック ---
+      if (postId) {
+        // Logger.log(`Post ${id} already posted (ID: ${postId}). Skipping.`); // 通常はログ不要
+        continue;
+      }
+
+      // --- 2. 有効な投稿予定時刻かチェック ---
       try {
-        // 投稿スケジュールの変換とエラーハンドリング
-        if (postSchedule instanceof Date) {
-          scheduleDate = postSchedule;
-        } else {
-          scheduleDate = new Date(postSchedule as string);
+        if (
+          postScheduleValue instanceof Date &&
+          !isNaN(postScheduleValue.getTime())
+        ) {
+          scheduleDate = postScheduleValue;
+        } else if (
+          typeof postScheduleValue === "string" &&
+          postScheduleValue.trim() !== ""
+        ) {
+          scheduleDate = new Date(postScheduleValue.trim());
           if (isNaN(scheduleDate.getTime())) {
-            // 日付が無効な場合
-            throw new Error(`Invalid date format: ${postSchedule}`);
+            throw new Error(`Invalid date string: "${postScheduleValue}"`);
           }
+        } else {
+          throw new Error(`Missing or invalid Post Schedule value.`);
         }
       } catch (e: any) {
         const context = `Post Schedule Error (Post ID: ${id})`;
         logErrorToSheet(e, context);
         const errorMessage = `${context}: ${e.message}`;
         Logger.log(errorMessage);
-        sendErrorEmail(errorMessage, "Post Schedule Error"); // エラーメール送信
-        continue; // 次の投稿処理へ * returnでも良い
+        // sendErrorEmail(errorMessage, "Post Schedule Error"); // 必要であればメール通知
+        continue; // 次の投稿へ
       }
 
-      // 投稿予定時刻が現在時刻から1分以内かチェック *順番を入れ替え
-      if (scheduleDate && isWithinOneMinute(now, scheduleDate) && !postId) {
-        cache.put(processingKey, "true", 600); // 10分間有効 (処理完了時に削除) *ここ
+      // --- 3. 時刻条件チェック ---
+      if (scheduleDate) {
+        const scheduleTime = scheduleDate.getTime();
+        const isPastOrPresent = scheduleTime <= nowTime;
+        const isWithinFutureThreshold =
+          scheduleTime > nowTime && scheduleTime <= thresholdTime;
 
-        try {
-          // メディアIDを取得 (メディアがある場合)
-          const mediaIds = mediaUrls
-            ? await uploadMediaToX(mediaUrls as string, accountId)
-            : [];
-
-          // リプライ先の投稿IDを取得 (inReplyToInternal がある場合)
-          let replyToPostId = inReplyToInternal
-            ? getReplyToPostId(postedSheet, inReplyToInternal as string)
-            : null; // Postedシートから検索
-
-          // Postedシートにない場合には Posts シートから検索
-          if (!replyToPostId && inReplyToInternal) {
-            replyToPostId = getReplyToPostId(
-              postsSheet,
-              inReplyToInternal as string
-            );
-          }
-
-          // X に投稿
-          const response = await postTweet(
-            content as string,
-            mediaIds,
-            replyToPostId,
-            accountId
+        // 投稿対象かどうか
+        if (isPastOrPresent || isWithinFutureThreshold) {
+          Logger.log(
+            `Post ${id} scheduled for ${scheduleDate.toISOString()} is eligible for posting. Reason: ${
+              isPastOrPresent ? "Past/Present" : "Within Future Threshold"
+            }`
           );
 
-          // 投稿IDを保存、Postedシートへ移動
-          if (response && response.data && response.data.id) {
-            // 行番号をマッピングから取得
-            const rowNumber = rowMapping[id as string];
+          // 処理中フラグを立てる
+          cache.put(processingKey, "true", 600); // 10分間
 
-            if (rowNumber) {
-              const postedRow = postsSheet.getRange(
-                rowNumber,
-                1,
-                1,
-                postsSheet.getLastColumn()
-              );
+          try {
+            // --- メディアアップロード (変更なし) ---
+            const mediaIds = mediaUrls
+              ? await uploadMediaToX(mediaUrls, accountId)
+              : [];
 
-              // postID と inReplyToOnX を更新
-              postedRow.getCell(1, 7).setValue(response.data.id);
-              if (replyToPostId) {
-                postedRow.getCell(1, 8).setValue(replyToPostId);
-                postedRow.getCell(1, 9).setValue(new Date());
+            // --- リプライ先ID取得 (改善) ---
+            let replyToPostId: string | null = null;
+            if (inReplyToInternal) {
+              // まずPostedシートから検索
+              replyToPostId = getReplyToPostId(postedSheet, inReplyToInternal);
+              // 見つからなければPostsシートからも検索 (同一バッチ内のリプライ用)
+              if (!replyToPostId) {
+                replyToPostId = getReplyToPostId(postsSheet, inReplyToInternal);
+                if (replyToPostId) {
+                  Logger.log(
+                    `Found replyToPostId (${replyToPostId}) for internal ID ${inReplyToInternal} in Posts sheet.`
+                  );
+                }
               }
-              // Posted シートに移動
-              postedSheet.appendRow(postedRow.getValues()[0]);
-              postsSheet.deleteRow(rowNumber); // deleteRow を使用
-
-              Logger.log(`Post successful! Post ID: ${response.data.id}`);
-            } else {
-              Logger.log(`Error: Could not find row number for post ID ${id}`); // 行番号が見つからない場合
+              if (!replyToPostId) {
+                Logger.log(
+                  `Warning: Could not find reply target post (internal ID: ${inReplyToInternal}) for post ${id}. Posting without reply.`
+                );
+                // エラーにする場合はここで throw new Error(...)
+              }
             }
-          } else {
-            const errorMessage = `Post failed. Response: ${JSON.stringify(
-              response
-            )}`;
+
+            // --- Xへ投稿 (変更なし) ---
+            Logger.log(
+              `Attempting to post tweet for ID: ${id}, Account: ${accountId}, Content: "${content.substring(
+                0,
+                50
+              )}...", Media: ${mediaIds.length > 0}, ReplyTo: ${
+                replyToPostId || "None"
+              }`
+            );
+            const response = await postTweet(
+              content,
+              mediaIds,
+              replyToPostId,
+              accountId
+            );
+
+            // --- 投稿成功後の処理 (改善) ---
+            if (response && response.data && response.data.id) {
+              const newPostIdOnX = response.data.id;
+              const rowNumber = rowMapping[id];
+
+              if (rowNumber) {
+                // 元の行データを取得
+                const originalRowValues = postsSheet
+                  .getRange(rowNumber, 1, 1, postsSheet.getLastColumn())
+                  .getValues()[0];
+
+                // Postedシートに追加するデータを作成 (MAIN_HEADERS.POSTED_HEADERS 順)
+                const postedRowData = MAIN_HEADERS.POSTED_HEADERS.map(
+                  (header) => {
+                    const postHeaderIndex = postsHeaderMap[header];
+                    if (header === "postedAt") {
+                      return new Date(); // 投稿日時
+                    } else if (header === "postIdOnX") {
+                      return newPostIdOnX; // Xでの投稿ID
+                    } else if (header === "inReplyToOnX") {
+                      return replyToPostId || ""; // Xでのリプライ先ID
+                    } else if (postHeaderIndex !== undefined) {
+                      // Postsシートに対応する列があればその値
+                      return originalRowValues[postHeaderIndex];
+                    } else {
+                      return ""; // 対応する列がなければ空文字
+                    }
+                  }
+                );
+
+                // Postedシートに追加
+                postedSheet.appendRow(postedRowData);
+                // Postsシートから削除
+                postsSheet.deleteRow(rowNumber);
+
+                Logger.log(
+                  `Post successful for ID: ${id}! X Post ID: ${newPostIdOnX}. Moved to Posted sheet.`
+                );
+
+                // rowMappingから削除された行のエントリを削除（必須ではないが整合性のため）
+                delete rowMapping[id];
+                // 後続の行番号を更新する必要があるが、このループではもう使わない想定
+              } else {
+                // rowMappingにIDがない場合 (通常は起こらないはず)
+                throw new Error(
+                  `Internal consistency error: Row number not found in mapping for supposedly existing post ID ${id}.`
+                );
+              }
+            } else {
+              // APIレスポンスが不正な場合
+              throw new Error(
+                `Post failed. Invalid response from X API: ${JSON.stringify(
+                  response
+                )}`
+              );
+            }
+          } catch (error: any) {
+            const context = `X Post Error (Post ID: ${id})`;
+            logErrorToSheet(error, context);
+            const errorMessage = `${context}: ${error.message} \nStack: ${error.stack}`;
             Logger.log(errorMessage);
-            sendErrorEmail(errorMessage, "X Post Failed");
+            sendErrorEmail(errorMessage, "X Post Error"); // エラーメール送信
+            // エラーが発生しても次の投稿へ進む (キャッシュはfinallyで削除)
+          } finally {
+            // 処理中フラグを削除
+            cache.remove(processingKey);
           }
-        } catch (error: any) {
-          const context = `X Post Error (Post ID: ${id})`;
-          logErrorToSheet(error, context);
-          const errorMessage = `${context}: ${error} \n\nStack Trace:\n ${error.stack}`;
-          Logger.log(errorMessage);
-          sendErrorEmail(errorMessage, "X Post Error");
-        } finally {
-          cache.remove(processingKey); // 処理中フラグを削除 (エラー時も含む)
+        } else {
+          // 投稿対象外 (未来すぎる)
+          // Logger.log(`Post ${id} scheduled for ${scheduleDate.toISOString()} is not yet due. Skipping.`); // 通常ログ不要
         }
       }
-    }
+      // scheduleDate が null の場合は上で continue されている
+    } // end of for loop
 
-    // Postedシートを投稿時刻順にソート (B列で昇順ソート)
+    // --- Postedシートのソート (変更なし) ---
     sortPostsBySchedule(postedSheet);
+    Logger.log("Finished autoPostToX cycle.");
   } catch (e: any) {
-    const context = "Error in autoPostToX function";
+    // --- 全体エラーハンドリング (変更なし) ---
+    const context = "Critical Error in autoPostToX function";
     logErrorToSheet(e, context);
-    const errorMessage = `${context}: ${e.message} \n\nStack Trace:\n ${e.stack}`;
+    const errorMessage = `${context}: ${e.message} \nStack: ${e.stack}`;
     Logger.log(errorMessage);
-    sendErrorEmail(errorMessage, "X Autopost System Error");
+    sendErrorEmail(errorMessage, "X Autopost System Critical Error");
   }
 }
 

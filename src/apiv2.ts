@@ -241,8 +241,8 @@ function doPost(e) {
             case "updateInReplyTo":
               // 配列データの取得
               let updateReplyArray;
-              if (requestData.updates && Array.isArray(requestData.updates)) {
-                updateReplyArray = requestData.updates;
+              if (requestData.threads && Array.isArray(requestData.threads)) {
+                updateReplyArray = requestData.threads;
               } else if (Array.isArray(requestData)) {
                 updateReplyArray = requestData;
               } else {
