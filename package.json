@@ -14,10 +14,8 @@
     "cleanup-dist-copy": "del-cli code.js",
     "testgen": "del-cli src/test/testApi.js && tsc --project test-tsconfig.json"
   },
-  "dependencies": {
-    "@types/google-apps-script": "^1.0.97"
-  },
   "devDependencies": {
+    "@types/google-apps-script": "^1.0.97",
     "@types/jest": "^29.5.14",
     "copyfiles": "^2.4.1",
     "del-cli": "^6.0.0",

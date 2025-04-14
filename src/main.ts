@@ -2,6 +2,7 @@
 import { logErrorToSheet, sendErrorEmail, sortPostsBySchedule } from "./utils";
 
 import { uploadMediaToX } from "./media";
+import { deleteTriggerByHandler } from "./api/triggers";
 
 import {
   generateSignature,
@@ -28,10 +29,11 @@ const MAIN_HEADERS = {
   // Postedシート用のヘッダー列（postedAt列を追加）
   POSTED_HEADERS: [
     "id",
-    "postSchedule",
+    "createdAt",
     "postTo",
     "contents",
     "media",
+    "postSchedule",
     "inReplytoInternal",
     "postId",
     "inReplyToOnX",
@@ -99,6 +101,8 @@ function getTriggerIntervalMinutes(functionName: string): number {
 
 // --- 修正後の autoPostToX 関数 ---
 async function autoPostToX() {
+  let postMadeInThisRun = false; // Flag to track if a post was made
+  let hasScheduledPosts = false; // Flag to track if there are scheduled posts
   try {
     // --- シート取得 (変更なし) ---
     const postsSheet = getOrCreateSheetWithHeaders(
@@ -145,13 +149,14 @@ async function autoPostToX() {
       return map;
     }, {} as { [key: string]: number });
     const idIndex = postsHeaderMap[HEADERS.POST_HEADERS[0]]; // Assuming ID is the first header
-    const scheduleIndex = postsHeaderMap[HEADERS.POST_HEADERS[1]]; // Assuming Post Schedule is the second
+    const createdAtIndex = postsHeaderMap[HEADERS.POST_HEADERS[1]]; // CreatedAt
     const postToIndex = postsHeaderMap[HEADERS.POST_HEADERS[2]];
     const contentIndex = postsHeaderMap[HEADERS.POST_HEADERS[3]];
     const mediaUrlsIndex = postsHeaderMap[HEADERS.POST_HEADERS[4]];
-    const inReplyToInternalIndex = postsHeaderMap[HEADERS.POST_HEADERS[5]];
-    const postIdIndex = postsHeaderMap[HEADERS.POST_HEADERS[6]]; // 投稿済みIDの列
-    // const inReplyToOnXIndex = postsHeaderMap[HEADERS.POST_HEADERS[7]]; // Postsシートには基本的に無い想定だが念のため
+    const scheduleIndex = postsHeaderMap[HEADERS.POST_HEADERS[5]];
+    const inReplyToInternalIndex = postsHeaderMap[HEADERS.POST_HEADERS[6]];
+    const postIdIndex = postsHeaderMap[HEADERS.POST_HEADERS[7]]; // 投稿済みIDの列
+    // const inReplyToOnXIndex = postsHeaderMap[HEADERS.POST_HEADERS[8]]; // Postsシートには基本的に無い想定だが念のため
 
     for (const postData of postsData) {
       // --- 各投稿データの取得 (インデックス使用) ---
@@ -293,7 +298,7 @@ async function autoPostToX() {
                     const postHeaderIndex = postsHeaderMap[header];
                     if (header === "postedAt") {
                       return new Date(); // 投稿日時
-                    } else if (header === "postIdOnX") {
+                    } else if (header === "postId") {
                       return newPostIdOnX; // Xでの投稿ID
                     } else if (header === "inReplyToOnX") {
                       return replyToPostId || ""; // Xでのリプライ先ID
@@ -318,6 +323,8 @@ async function autoPostToX() {
                 // rowMappingから削除された行のエントリを削除（必須ではないが整合性のため）
                 delete rowMapping[id];
                 // 後続の行番号を更新する必要があるが、このループではもう使わない想定
+                postMadeInThisRun = true; // 投稿が成功したフラグを立てる
+                break;
               } else {
                 // rowMappingにIDがない場合 (通常は起こらないはず)
                 throw new Error(
@@ -345,14 +352,82 @@ async function autoPostToX() {
           }
         } else {
           // 投稿対象外 (未来すぎる)
-          // Logger.log(`Post ${id} scheduled for ${scheduleDate.toISOString()} is not yet due. Skipping.`); // 通常ログ不要
+          Logger.log(
+            `Post ${id} scheduled for ${scheduleDate.toISOString()} is not yet due. Skipping.`
+          ); // 通常ログ不要
+          break;
         }
-      }
-      // scheduleDate が null の場合は上で continue されている
+      } // end if(scheduleDate)
     } // end of for loop
 
+    // --- Check if any scheduled posts remain in the Posts sheet ---
+    const remainingPostsData = postsSheet.getDataRange().getValues().slice(1); // Get fresh data after potential deletions
+    const scheduleIndexAfterLoop = postsHeaderMap[HEADERS.POST_HEADERS[5]]; // Get schedule index again
+
+    for (const row of remainingPostsData) {
+      const scheduleValue = row[scheduleIndexAfterLoop];
+      if (
+        scheduleValue &&
+        scheduleValue instanceof Date &&
+        !isNaN(scheduleValue.getTime())
+      ) {
+        // Found a row with a valid schedule date
+        hasScheduledPosts = true;
+        break; // No need to check further
+      } else if (
+        typeof scheduleValue === "string" &&
+        scheduleValue.trim() !== ""
+      ) {
+        // Also consider valid date strings
+        const parsedDate = new Date(scheduleValue.trim());
+        if (!isNaN(parsedDate.getTime())) {
+          hasScheduledPosts = true;
+          break;
+        }
+      }
+    }
+
+    // --- Delete trigger if no scheduled posts are left ---
+    if (!hasScheduledPosts && remainingPostsData.length > 0) {
+      // Check if sheet is not empty but has no scheduled posts
+      Logger.log(
+        "No remaining posts with valid schedules found. Attempting to delete the autoPostToX trigger."
+      );
+      const deleted = deleteTriggerByHandler(HANDLER_FUNCTION_NAME);
+      if (deleted) {
+        Logger.log(
+          "Successfully deleted the autoPostToX trigger as no scheduled posts remain."
+        );
+      } else {
+        Logger.log(
+          "Could not delete the autoPostToX trigger (might not exist or error occurred)."
+        );
+      }
+    } else if (remainingPostsData.length === 0) {
+      Logger.log(
+        "Posts sheet is empty. Attempting to delete the autoPostToX trigger."
+      );
+      const deleted = deleteTriggerByHandler(HANDLER_FUNCTION_NAME);
+      if (deleted) {
+        Logger.log(
+          "Successfully deleted the autoPostToX trigger as the Posts sheet is empty."
+        );
+      } else {
+        Logger.log(
+          "Could not delete the autoPostToX trigger (might not exist or error occurred)."
+        );
+      }
+    } else {
+      Logger.log(
+        "Scheduled posts still exist or sheet is empty. Trigger remains active."
+      );
+    }
+
     // --- Postedシートのソート (変更なし) ---
-    sortPostsBySchedule(postedSheet);
+    // Only sort if a post might have been added
+    if (postMadeInThisRun) {
+      sortPostsBySchedule(postedSheet);
+    }
     Logger.log("Finished autoPostToX cycle.");
   } catch (e: any) {
     // --- 全体エラーハンドリング (変更なし) ---
@@ -360,7 +435,7 @@ async function autoPostToX() {
     logErrorToSheet(e, context);
     const errorMessage = `${context}: ${e.message} \nStack: ${e.stack}`;
     Logger.log(errorMessage);
-    sendErrorEmail(errorMessage, "X Autopost System Critical Error");
+    // sendErrorEmail(errorMessage, "X Autopost System Critical Error");
   }
 }
 
@@ -378,35 +453,43 @@ async function postTweet(
   replyToPostId: string | null,
   accountId: string
 ): Promise<any> {
-  const { apiKey, apiKeySecret, apiAccessToken, apiAccessTokenSecret } =
+  // Use the correct property names based on the logged object
+  const { apiKey, apiKeySecret, accessToken, accessTokenSecret } =
     getXAuthById(accountId);
 
-  if (!apiKey || !apiKeySecret || !apiAccessToken || !apiAccessTokenSecret) {
+  // This check should now work correctly
+  if (!apiKey || !apiKeySecret || !accessToken || !accessTokenSecret) {
     throw new Error("APIキーまたはアクセストークンが設定されていません");
   }
 
   // 1. OAuthパラメーターの設定（ツイート投稿API V2）
   const oauthParams = {
     oauth_consumer_key: apiKey,
-    oauth_token: apiAccessToken,
+    oauth_token: accessToken,
     oauth_signature_method: "HMAC-SHA1",
     oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
     oauth_nonce: Utilities.base64Encode(
-      // @ts-ignore
-      Utilities.getSecureRandomBytes(32)
-    ).replace(/\W/g, ""), // ランダムなnonce値 (Base64エンコード)
+      Math.random().toString() + Date.now().toString()
+    ),
     oauth_version: "1.0",
   };
 
   // 2. リクエストボディ（ポスト API V２用）
   const requestBody: any = {
-    text: Text,
-    media: { media_ids: mediaIds },
+    text: content, // Use the 'content' parameter here
   };
+  // Add media only if mediaIds exist and are not empty
+  if (mediaIds && mediaIds.length > 0) {
+    requestBody.media = { media_ids: mediaIds };
+  }
+  // Add reply settings if replyToPostId exists
+  if (replyToPostId) {
+    requestBody.reply = { in_reply_to_tweet_id: replyToPostId };
+  }
 
   // 3. 署名キーの生成
   const signingKey = `${encodeURIComponent(apiKeySecret)}&${encodeURIComponent(
-    apiAccessTokenSecret
+    accessTokenSecret
   )}`;
 
   // 4. 署名ベース文字列の生成 (ツイート投稿URLとOAuthパラメータを使用)
@@ -427,23 +510,42 @@ async function postTweet(
     .join(", ")}`;
 
   // 6. UrlFetchApp でツイート投稿 API v2 を実行
-  const options = {
-    method: "POST",
+  const options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
+    method: "post",
     headers: {
       Authorization: authHeader,
       "Content-Type": "application/json", // ツイート投稿 API v2 は application/json
     },
     payload: JSON.stringify(requestBody), // リクエストボディをJSON文字列に変換
+    muteHttpExceptions: true, // Prevent exceptions for non-2xx responses
   };
 
   try {
-    // @ts-ignore
-    const response = UrlFetchApp.fetch(tweetUrl, options); // APIリクエストを実行
-    const responseJson = JSON.parse(response.getContentText()); // レスポンスをJSONオブジェクトに変換
-    Logger.log(`ツイートが投稿されました:${responseJson.data.id}`); // ログ出力
-    return responseJson; // レスポンスを返す
-  } catch (error) {
-    Logger.log("ツイート投稿エラー:", error); // エラーログ出力
+    // Use fetchWithRetries for resilience
+    const response = utils.fetchWithRetries(TWITTER_API_ENDPOINT, options);
+    const responseCode = response.getResponseCode();
+    const responseText = response.getContentText();
+    const responseJson = JSON.parse(responseText); // Try parsing JSON regardless of code
+
+    if (responseCode >= 200 && responseCode < 300) {
+      Logger.log(`Tweet posted successfully: ${responseJson?.data?.id}`); // ログ出力
+      return responseJson; // レスポンスを返す
+    } else {
+      // Handle API errors more gracefully
+      Logger.log(
+        `Tweet post failed. Status: ${responseCode}, Response: ${responseText}`
+      );
+      // Throw a more informative error
+      throw new Error(
+        `X API Error (${responseCode}): ${
+          responseJson?.title || "Unknown error"
+        } - ${responseJson?.detail || responseText}`
+      );
+    }
+  } catch (error: any) {
+    Logger.log("Tweet post error:", error); // エラーログ出力
+    // Re-throw the error so it can be caught by autoPostToX
+    throw error;
   }
 }
 
@@ -462,7 +564,10 @@ function getReplyToPostId(
   for (let i = 1; i < data.length; i++) {
     if (data[i][0] === inReplyToInternal) {
       // A列 (id) を比較
-      return data[i][6] as string; // G列 (postId) を返す
+      Logger.log(
+        `Found reply target postId: ${data[i][7]} for internal ID ${inReplyToInternal}`
+      );
+      return data[i][7] as string; // G列 (postId) を返す
     }
   }
   return null; // 見つからない場合

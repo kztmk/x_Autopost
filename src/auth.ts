@@ -1,5 +1,6 @@
 // auth.ts (認証関連の関数)
 import { XAuthInfo } from "./types";
+import { maskSensitive } from "./utils"; // Import the masking function
 
 // ** 🌟  ここに Google Drive の "X-mediaFiles" フォルダの ID を指定してください 🌟 **
 // const TEST_MEDIA_FOLDER_ID = 'YOUR_X_MEDIA_FILES_FOLDER_ID'; // 例: 'xxxxxxxxxxxxxxxxxxxxxxxxx'  <-  実際のフォルダIDに置き換えてください
@@ -15,7 +16,7 @@ export function generateSignatureBaseString(method, url, params) {
   const sortedParams = Object.keys(params)
     .sort()
     .map((key) => `${key}=${encodeURIComponent(params[key])}`)
-    .join('&');
+    .join("&");
   return `${method.toUpperCase()}&${encodeURIComponent(
     url
   )}&${encodeURIComponent(sortedParams)}`;
@@ -28,12 +29,15 @@ export function generateSignatureBaseString(method, url, params) {
  * @return {string} 署名 (Base64エンコード済み)
  */
 export function generateSignature(signatureBaseString, signingKey) {
-  // @ts-ignore  //
-  const signature = Utilities.computeHmacSha1Signature(
+  // Use the correct Apps Script method for HMAC-SHA1
+  // @ts-ignore // May be needed if types are slightly off
+  const signatureBytes = Utilities.computeHmacSignature(
+    // @ts-ignore // May be needed if types are slightly off
+    Utilities.MacAlgorithm.HMAC_SHA_1,
     signatureBaseString,
     signingKey
   );
-  return Utilities.base64Encode(signature);
+  return Utilities.base64Encode(signatureBytes);
 }
 
 /**
@@ -46,8 +50,8 @@ export function generateSignature(signatureBaseString, signingKey) {
  */
 export function getXAuthById(accountId) {
   // accountId のバリデーション
-  if (!accountId || typeof accountId !== 'string' || accountId.trim() === '') {
-    throw new Error('Invalid or missing accountId provided.');
+  if (!accountId || typeof accountId !== "string" || accountId.trim() === "") {
+    throw new Error("Invalid or missing accountId provided.");
   }
 
   const properties = PropertiesService.getScriptProperties();
@@ -65,21 +69,33 @@ export function getXAuthById(accountId) {
     const authInfo = JSON.parse(authInfoString);
 
     // パース結果がオブジェクトであることを念のため確認
-    if (typeof authInfo !== 'object' || authInfo === null) {
-        throw new Error(`Invalid data format found for accountId '${accountId}'.`);
+    if (typeof authInfo !== "object" || authInfo === null) {
+      throw new Error(
+        `Invalid data format found for accountId '${accountId}'.`
+      );
     }
 
-    Logger.log(`XAuthInfo retrieved for accountId: ${accountId}`);
+    // Log masked sensitive information
+    Logger.log(
+      `XAuthInfo retrieved: ${JSON.stringify({
+        ...authInfo,
+        apiKey: maskSensitive(authInfo.apiKey),
+        apiKeySecret: maskSensitive(authInfo.apiKeySecret),
+        accessToken: maskSensitive(authInfo.accessToken),
+        accessTokenSecret: maskSensitive(authInfo.accessTokenSecret),
+      })}`
+    );
     return authInfo; // XAuthInfoオブジェクトを返す
-
   } catch (e: any) {
     // JSON.parseのエラーなどもここで捕捉される
     Logger.log(`Error getting XAuthInfo for accountId ${accountId}: ${e}`);
     // 元のエラーメッセージを含めて再スローするか、より汎用的なメッセージにする
-    if (e.message.includes('not found')) {
-         throw e; // 見つからないエラーはそのままスロー
+    if (e.message.includes("not found")) {
+      throw e; // 見つからないエラーはそのままスロー
     } else {
-         throw new Error(`Failed to get or parse XAuthInfo for accountId ${accountId}: ${e.message}`);
+      throw new Error(
+        `Failed to get or parse XAuthInfo for accountId ${accountId}: ${e.message}`
+      );
     }
   }
 }
@@ -96,19 +112,19 @@ export function generateAuthHeader(accountId, xPostUrl) {
     getXAuthById(accountId);
 
   if (!apiKey || !apiKeySecret || !apiAccessToken || !apiAccessTokenSecret) {
-    throw new Error('APIキーまたはアクセストークンが設定されていません');
+    throw new Error("APIキーまたはアクセストークンが設定されていません");
   }
 
   const oauthParams = {
     oauth_consumer_key: apiKey,
     oauth_token: apiAccessToken,
-    oauth_signature_method: 'HMAC-SHA1',
+    oauth_signature_method: "HMAC-SHA1",
     oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
     oauth_nonce: Utilities.base64Encode(
       // @ts-ignore  //
       Utilities.getSecureRandomBytes(32)
-    ).replace(/\W/g, ''),
-    oauth_version: '1.0',
+    ).replace(/\W/g, ""),
+    oauth_version: "1.0",
   };
 
   // 署名キーの生成
@@ -118,7 +134,7 @@ export function generateAuthHeader(accountId, xPostUrl) {
 
   // 署名ベース文字列の生成 (ツイート投稿URLとOAuthパラメータを使用)
   const signatureBaseString = generateSignatureBaseString(
-    'POST',
+    "POST",
     xPostUrl,
     oauthParams
   ); // ツイートURL, OAuth params のみ署名対象
@@ -131,7 +147,7 @@ export function generateAuthHeader(accountId, xPostUrl) {
     oauth_signature: oauthSignature,
   })
     .map(([key, value]) => `${key}="${encodeURIComponent(value)}"`)
-    .join(', ')}`;
+    .join(", ")}`;
 
   return authHeader;
 }

@@ -3,118 +3,120 @@ import {
   generateSignature,
   generateSignatureBaseString,
   getXAuthById,
-} from './auth';
-import { logErrorToSheet, sendErrorEmail } from './utils';
+} from "./auth";
+import { logErrorToSheet, sendErrorEmail } from "./utils";
+import * as utils from "./utils"; // Assuming fetchWithRetries is in utils
 
 const TWITTER_MEDIA_UPLOAD_ENDPOINT =
-  'https://upload.twitter.com/1.1/media/upload.json';
+  "https://upload.twitter.com/1.1/media/upload.json";
 
 // X (Twitter) がサポートするメディアタイプと拡張子のマッピング (必要に応じて更新)
 const SUPPORTED_MEDIA_TYPES: { [key: string]: string } = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/gif': 'gif',
-  'video/mp4': 'mp4',
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/gif": "gif",
+  "video/mp4": "mp4",
   // 'video/quicktime': 'mov', // 状況により追加
 };
 
 /**
- * Google DriveのファイルURLからファイルIDを取得する
- * @param url
- * @returns id or
- */
-function getFileIdFromUrl(url) {
-  try {
-    const urlObj = new URL(url);
-    let fileId = urlObj.pathname.split('/')[3]; // 例: /file/d/ファイルID/view の場合、3番目の要素がファイルID
-    if (!fileId) {
-      // pathname から取得できない場合は、searchParams から id パラメータを探す
-      fileId = urlObj.searchParams.get('id') || '';
-    }
-    return fileId;
-  } catch (e) {
-    // URLパースエラーの場合、またはファイルIDが見つからない場合は null を返す
-    return null;
-  }
-}
-
-/**
- * Google DriveのファイルをXにアップロードし、メディアIDの配列を返す。(チャンクアップロード)
+ * Google DriveのファイルをXにアップロードし、メディアIDの配列を返す。(シンプルアップロード)
  *
- * @param {string[]} mediaUrls Google DriveのファイルURLの配列
+ * @param {string} mediaUrls JSON string representing an array of media objects, each with a fileId.
  * @param {string} accountId アカウントID (小文字)
  * @return {Promise<string[]>} メディアIDの配列
  */
 export async function uploadMediaToX(
-  mediaUrls: string,
+  mediaUrls: string, // This is now a JSON string
   accountId: string
 ): Promise<string[]> {
   const mediaIds: string[] = [];
-  const urls = mediaUrls.split(',').filter((url) => url.trim() !== ''); // 空のURLを除外
+  let mediaObjects: { fileId: string; [key: string]: any }[] = []; // Define type for parsed objects
 
-  const { apiKey, apiKeySecret, apiAccessToken, apiAccessTokenSecret } =
-    getXAuthById(accountId);
-
-  if (!apiKey || !apiKeySecret || !apiAccessToken || !apiAccessTokenSecret) {
-    throw new Error('APIキーまたはアクセストークンが設定されていません');
+  try {
+    // Parse the JSON string into an array of objects
+    if (mediaUrls && mediaUrls.trim() !== "" && mediaUrls.trim() !== "[]") {
+      mediaObjects = JSON.parse(mediaUrls);
+      if (!Array.isArray(mediaObjects)) {
+        throw new Error("Parsed mediaUrls is not an array.");
+      }
+    }
+  } catch (e: any) {
+    throw new Error(`Failed to parse mediaUrls JSON: ${e.message}`);
   }
 
-  for (const url of urls) {
-    let mediaId: string | null = null; // 各ファイルごとの mediaId
+  // If no valid media objects, return empty array
+  if (mediaObjects.length === 0) {
+    Logger.log("No media objects found to upload.");
+    return [];
+  }
+
+  const { apiKey, apiKeySecret, accessToken, accessTokenSecret } =
+    getXAuthById(accountId);
+
+  // This check should now work correctly
+  if (!apiKey || !apiKeySecret || !accessToken || !accessTokenSecret) {
+    throw new Error("APIキーまたはアクセストークンが設定されていません");
+  }
+
+  // Iterate through the parsed media objects
+  for (const mediaObject of mediaObjects) {
+    let mediaId: string | null = null; // Each file's mediaId
+    const fileId = mediaObject.fileId; // Get fileId directly from the object
+
     try {
-      const fileId = getFileIdFromUrl(url);
-      if (!fileId) {
-        throw new Error(`Invalid Google Drive URL: ${url}`);
+      // Validate fileId
+      if (!fileId || typeof fileId !== "string" || fileId.trim() === "") {
+        throw new Error(
+          `Invalid or missing fileId in media object: ${JSON.stringify(
+            mediaObject
+          )}`
+        );
       }
 
-      const file = DriveApp.getFileById(fileId[0]);
+      // Get the file using the fileId
+      const file = DriveApp.getFileById(fileId);
       const fileSize = file.getSize();
       const mediaType = file.getMimeType();
 
       // メディアタイプのチェック
       if (!SUPPORTED_MEDIA_TYPES[mediaType]) {
-        throw new Error(`Unsupported media type: ${mediaType}`);
+        throw new Error(
+          `Unsupported media type: ${mediaType} for file ID: ${fileId}`
+        );
       }
 
       // blob
       const blob = file.getBlob();
-      // BlobをBase64エンコード
-      const base64Data = Utilities.base64Encode(blob.getBytes());
-
-      // OAuthパラメータ作成のためheaerの情報を取得
-      //const authHeader = generateAuthHeader(accountId, TWITTER_MEDIA_UPLOAD_ENDPOINT);
+      // BlobをBase64エンコード // <-- No longer needed for multipart
+      // const base64Data = Utilities.base64Encode(blob.getBytes());
 
       // OAuthパラメータ設定（メディアアップロード用）
       const oauthParams = {
         oauth_consumer_key: apiKey,
-        oauth_token: apiAccessToken,
-        oauth_signature_method: 'HMAC-SHA1',
+        oauth_token: accessToken, // Use accessToken
+        oauth_signature_method: "HMAC-SHA1",
         oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
         oauth_nonce: Utilities.base64Encode(
-          // @ts-ignore
-          Utilities.getSecureRandomBytes(32)
-        ).replace(/\W/g, ''),
-        oauth_version: '1.0',
-      };
-
-      const uploadParams = {
-        media_data: base64Data,
-        ...oauthParams,
+          Math.random().toString() + Date.now().toString()
+        ), // Use simpler nonce generation
+        oauth_version: "1.0",
       };
 
       // 署名キーの作成
       const signingKey = `${encodeURIComponent(
         apiKeySecret
-      )}&${encodeURIComponent(apiAccessTokenSecret)}`;
+      )}&${encodeURIComponent(accessTokenSecret)}`; // Use accessTokenSecret
 
       // 署名ベース文字列の生成
       const signatureBaseString = generateSignatureBaseString(
-        'POST',
+        "POST",
         TWITTER_MEDIA_UPLOAD_ENDPOINT,
         oauthParams
       );
       // 署名の生成
       const oauthSignature = generateSignature(signatureBaseString, signingKey);
+
       // OAuth認証ヘッダーの生成
       // @ts-ignore
       const authHeader = `OAuth ${Object.entries({
@@ -122,51 +124,89 @@ export async function uploadMediaToX(
         oauth_signature: oauthSignature,
       })
         .map(([key, value]) => `${key}="${encodeURIComponent(value)}"`)
-        .join(', ')}`;
+        .join(", ")}`;
 
-      // UrlFetchApp でメディアアップロード API v1.1 を実行
-      const options = {
-        method: 'POST',
+      // UrlFetchApp でメディアアップロード API v1.1 を実行 (Multipart)
+      const options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
+        method: "post",
         headers: {
           Authorization: authHeader,
-          'Content-Type': 'application/x-www-form-urlencoded', // メディアアップロード API v1.1 は x-www-form-urlencoded
+          // Remove Content-Type header; UrlFetchApp sets it for multipart when payload contains Blob
         },
-        payload: uploadParams, // payload に uploadParams を指定 (UrlFetchApp が自動で x-www-form-urlencoded 形式に変換)
+        payload: {
+          // Send the raw Blob directly
+          media: blob,
+          // OAuth params are in the header, not payload for multipart
+        },
+        muteHttpExceptions: true,
       };
+
+      // --- Remove the previous detailed logging block if it's too verbose now ---
+      // Logger.log(`[Media Upload Debug] ...`);
 
       try {
         const response = UrlFetchApp.fetch(
           TWITTER_MEDIA_UPLOAD_ENDPOINT,
-          // @ts-ignore
           options
-        ); // APIリクエストを実行
-        const json = response.getContentText(); // レスポンスをJSON文字列として取得
-        const data = JSON.parse(json); // JSON文字列をJavaScriptオブジェクトにパース
-        const mediaId = data.media_id_string; // media_id_string を取得 (メディアID)
+        );
+        const responseCode = response.getResponseCode();
+        const responseText = response.getContentText();
+
+        if (responseCode >= 200 && responseCode < 300) {
+          const data = JSON.parse(responseText);
+          mediaId = data.media_id_string; // Assign to the loop-scoped mediaId
+          if (!mediaId) {
+            throw new Error(
+              "media_id_string not found in successful response."
+            );
+          }
+          Logger.log(
+            `File ID "${fileId}" uploaded successfully. Media ID: ${mediaId}`
+          );
+          mediaIds.push(mediaId);
+        } else {
+          // Handle API errors
+          Logger.log(
+            `Media upload failed for File ID "${fileId}". Status: ${responseCode}, Response: ${responseText}`
+          );
+          // Try parsing error response
+          let errorDetail = responseText;
+          try {
+            const errorJson = JSON.parse(responseText);
+            errorDetail = errorJson?.errors?.[0]?.message || responseText;
+          } catch (parseError) {
+            // Ignore if response is not JSON
+          }
+          throw new Error(
+            `X Media API Error (${responseCode}): ${errorDetail}`
+          );
+        }
+      } catch (error: any) {
+        // Catch specific API call errors
         Logger.log(
-          `URL "${url}" のファイルをアップロードしました。Media ID:`,
-          mediaId
-        ); // ログ出力
-        mediaIds.push(mediaId); // アップロードされたメディアIDを配列に追加
-      } catch (error) {
-        Logger.log(
-          `URL "${url}" のファイルのメディアアップロードエラー:`,
+          `Error during media upload API call for File ID "${fileId}":`,
           error
-        ); // エラーログ出力
-        throw error; // エラーをthrowして上位関数 (testUploadMediaAndTweet) で処理できるようにする (処理中断)
+        );
+        // Re-throw to be caught by the outer try-catch for logging to sheet/email
+        throw error;
       }
-      Logger.log(`Media uploaded and finalized. Media ID: ${mediaId}`);
     } catch (error: any) {
-      const context = `Media Upload Error (URL: ${url}, Media ID: ${
-        mediaId || 'N/A'
-      })`;
+      // Catch errors related to getting file, parsing, or the API call re-throw
+      const context = `Media Upload Error (File ID: ${
+        fileId || "N/A"
+      }, Account: ${accountId})`;
       logErrorToSheet(error, context); // エラーシートに記録
-      const errorMessage = `${context}: ${error} \n Stack Trace:\n ${error.stack} `;
+      const errorMessage = `${context}: ${error.message} \nStack: ${
+        error.stack || "N/A"
+      }`; // Use error.message and stack
       Logger.log(errorMessage);
-      sendErrorEmail(errorMessage, 'Media Upload Error'); //エラーメール送信
-      throw error; // エラーを再スローして、呼び出し元(autoPostToX)で処理
+      sendErrorEmail(errorMessage, "Media Upload Error"); //エラーメール送信
+      // Decide if one failure should stop all uploads or just skip the failed one
+      // Currently, it stops all by re-throwing. To skip, remove the throw below.
+      throw error; // Re-throw to stop processing further media objects on error
+      // Logger.log(`Skipping upload for File ID "${fileId}" due to error.`); // Log skipping if not re-throwing
     }
-  }
+  } // End of for loop
 
   return mediaIds;
 }

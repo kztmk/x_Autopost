@@ -22,6 +22,9 @@ function createTimeBasedTrigger(postData) {
       );
     }
 
+    // Log the intervalMinutes value
+    Logger.log(`Interval minutes received: ${intervalMinutes}`);
+
     // 既存の 'autoPostToX' ハンドラ関数を持つトリガーを削除し、関連プロパティも削除
     const triggers = ScriptApp.getProjectTriggers();
     for (const trigger of triggers) {
@@ -30,9 +33,8 @@ function createTimeBasedTrigger(postData) {
         deletedTriggerIds.push(existingTriggerId); // 削除対象IDを記録
         ScriptApp.deleteTrigger(trigger);
         deletedExistingCount++;
-        Logger.log(
-          `Deleted existing trigger for ${handlerFunction}: ${existingTriggerId}`
-        );
+        Logger.log(`Deleted existing trigger: ${existingTriggerId}`);
+
         // 対応するプロパティも削除
         const propertyKey = TRIGGER_INTERVAL_PREFIX + existingTriggerId;
         if (scriptProperties.getProperty(propertyKey)) {
@@ -52,14 +54,15 @@ function createTimeBasedTrigger(postData) {
       .create();
     newTriggerId = newTrigger.getUniqueId();
 
+    // Log the new trigger ID
+    Logger.log(`New trigger created with ID: ${newTriggerId}`);
+
     // 新しいトリガーIDと間隔を PropertiesService に保存
     const newPropertyKey = TRIGGER_INTERVAL_PREFIX + newTriggerId;
     scriptProperties.setProperty(newPropertyKey, intervalMinutes.toString());
 
-    Logger.log(
-      `Created new time-based trigger ${newTriggerId} to run ${handlerFunction} every ${intervalMinutes} minutes.`
-    );
-    Logger.log(`Saved script property: ${newPropertyKey} = ${intervalMinutes}`);
+    // Log property setting success
+    Logger.log(`Property set: ${newPropertyKey} = ${intervalMinutes}`);
 
     // 成功レスポンス
     return ContentService.createTextOutput(
@@ -264,4 +267,48 @@ function checkTriggerExists(functionName) {
   }
 }
 
-export { createTimeBasedTrigger, deleteAllTriggers, checkTriggerExists };
+/**
+ * Deletes the trigger associated with the specified handler function and its property.
+ * @param {string} handlerName The name of the handler function (e.g., 'autoPostToX').
+ * @returns {boolean} True if a trigger was found and deleted, false otherwise.
+ */
+function deleteTriggerByHandler(handlerName: string): boolean {
+  let deleted = false;
+  try {
+    const triggers = ScriptApp.getProjectTriggers();
+    for (const trigger of triggers) {
+      if (trigger.getHandlerFunction() === handlerName) {
+        const triggerId = trigger.getUniqueId();
+        Logger.log(
+          `Found trigger for handler '${handlerName}' (ID: ${triggerId}). Deleting...`
+        );
+        ScriptApp.deleteTrigger(trigger);
+
+        // Delete associated property
+        const propertyKey = TRIGGER_INTERVAL_PREFIX + triggerId;
+        if (scriptProperties.getProperty(propertyKey)) {
+          scriptProperties.deleteProperty(propertyKey);
+          Logger.log(`Deleted associated script property: ${propertyKey}`);
+        }
+        deleted = true;
+        break; // Assume only one trigger per handler
+      }
+    }
+    if (!deleted) {
+      Logger.log(`No trigger found for handler '${handlerName}'.`);
+    }
+  } catch (error: any) {
+    Logger.log(
+      `Error deleting trigger for handler '${handlerName}': ${error}`
+    );
+    // Depending on requirements, you might want to re-throw or handle differently
+  }
+  return deleted;
+}
+
+export {
+  createTimeBasedTrigger,
+  deleteAllTriggers,
+  checkTriggerExists,
+  deleteTriggerByHandler, // Export the new function
+};

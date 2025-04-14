@@ -1,4 +1,5 @@
 import { XAuthInfo } from "../types";
+import { maskSensitive } from "../utils"; // Import the masking function
 
 /**
  * Xの認証情報をプロパティサービスに保存します。
@@ -50,7 +51,7 @@ function createXAuth(authInfo): object {
 
 /**
  * プロパティに保存されている全てのX認証情報のaccountIdリストを取得します。
- * @return {XAuthInfo[]} 登録されているX認証情報のaccountIdの配列。
+ * @return {XAuthInfo[]} 登録されているX認証情報の配列。
  */
 function getXAuthAll() {
   const properties = PropertiesService.getScriptProperties();
@@ -91,7 +92,11 @@ function getXAuthAll() {
     }
   }
 
-  Logger.log(`Retrieved ${authAccountInfo.length} XAuth account IDs.`);
+  Logger.log(
+    `Retrieved ${authAccountInfo.length} XAuth accounts: [${authAccountInfo
+      .map((info) => maskSensitive(info.accountId))
+      .join(", ")}]`
+  );
   return authAccountInfo;
 }
 
