@@ -4,7 +4,7 @@ import {
   generateSignatureBaseString,
   getXAuthById,
 } from "./auth";
-import { logErrorToSheet, sendErrorEmail } from "./utils";
+import { logErrorToSheet } from "./utils";
 import * as utils from "./utils"; // Assuming fetchWithRetries is in utils
 
 const TWITTER_MEDIA_UPLOAD_ENDPOINT =
@@ -200,7 +200,6 @@ export async function uploadMediaToX(
         error.stack || "N/A"
       }`; // Use error.message and stack
       Logger.log(errorMessage);
-      sendErrorEmail(errorMessage, "Media Upload Error"); //エラーメール送信
       // Decide if one failure should stop all uploads or just skip the failed one
       // Currently, it stops all by re-throwing. To skip, remove the throw below.
       throw error; // Re-throw to stop processing further media objects on error

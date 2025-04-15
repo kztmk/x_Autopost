@@ -1,5 +1,5 @@
 // main.js (メインロジック)
-import { logErrorToSheet, sendErrorEmail, sortPostsBySchedule } from "./utils";
+import { logErrorToSheet, sortPostsBySchedule } from "./utils";
 
 import { uploadMediaToX } from "./media";
 import { deleteTriggerByHandler } from "./api/triggers";
@@ -344,7 +344,7 @@ async function autoPostToX() {
             logErrorToSheet(error, context);
             const errorMessage = `${context}: ${error.message} \nStack: ${error.stack}`;
             Logger.log(errorMessage);
-            sendErrorEmail(errorMessage, "X Post Error"); // エラーメール送信
+            //sendErrorEmail(errorMessage, "X Post Error"); // エラーメール送信
             // エラーが発生しても次の投稿へ進む (キャッシュはfinallyで削除)
           } finally {
             // 処理中フラグを削除

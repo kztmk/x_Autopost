@@ -3,24 +3,80 @@
 const ERROR_SHEET_NAME = "Errors";
 const GAS_X_AUTO_POST = "[X Auto Post:エラー報告]";
 
+import { SHEETS } from "./api/postData"; // Assuming SHEETS constant is defined here
+
+/**
+ * Tests the sortPostsBySchedule function on the "Posts" sheet.
+ */
+function testSortPostsSheet(): void {
+  Logger.log("--- Starting testSortPostsSheet ---");
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const postsSheet = ss.getSheetByName(SHEETS.POSTS);
+
+    if (!postsSheet) {
+      Logger.log(`Error: Sheet "${SHEETS.POSTS}" not found.`);
+      Logger.log("--- Finished testSortPostsSheet (with error) ---");
+      return;
+    }
+
+    Logger.log(`Found sheet: "${postsSheet.getName()}"`);
+
+    // Optional: Log data before sorting
+    if (postsSheet.getLastRow() > 1) {
+      const dataBefore = postsSheet
+        .getRange(2, 1, postsSheet.getLastRow() - 1, postsSheet.getLastColumn())
+        .getDisplayValues(); // Use getDisplayValues for easier logging
+      Logger.log("Data BEFORE sorting:");
+      dataBefore.forEach((row, index) =>
+        Logger.log(`Row ${index + 2}: ${row.join(", ")}`)
+      );
+    } else {
+      Logger.log("Sheet has no data rows to sort.");
+    }
+
+    // Call the function to sort
+    Logger.log("Calling sortPostsBySchedule...");
+    sortPostsBySchedule(postsSheet);
+    Logger.log("sortPostsBySchedule finished.");
+
+    // Optional: Log data after sorting
+    if (postsSheet.getLastRow() > 1) {
+      SpreadsheetApp.flush(); // Ensure changes are written before reading again
+      const dataAfter = postsSheet
+        .getRange(2, 1, postsSheet.getLastRow() - 1, postsSheet.getLastColumn())
+        .getDisplayValues(); // Use getDisplayValues for easier logging
+      Logger.log("Data AFTER sorting:");
+      dataAfter.forEach((row, index) =>
+        Logger.log(`Row ${index + 2}: ${row.join(", ")}`)
+      );
+    }
+  } catch (error: any) {
+    Logger.log(`An error occurred during the test: ${error.message}`);
+    Logger.log(`Stack: ${error.stack}`);
+  }
+
+  Logger.log("--- Finished testSortPostsSheet ---");
+}
+
 /**
  * Postsシートを投稿時刻 (postSchedule) でソートする。
+ * 有効な日付を持つ行を先に、日付順にソートし、日付を持たない行を後に配置する。
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet ソートするシート
  */
 export function sortPostsBySchedule(
   sheet: GoogleAppsScript.Spreadsheet.Sheet | null | undefined
 ): void {
-  // Add a check to ensure the sheet object is valid
   if (!sheet) {
     Logger.log(
       "Error in sortPostsBySchedule: Received an invalid sheet object (null or undefined)."
     );
-    // Optionally, throw an error or handle it differently
-    // throw new Error("sortPostsBySchedule received an invalid sheet object.");
-    return; // Exit the function if the sheet is invalid
+    return;
   }
 
-  if (sheet.getLastRow() <= 1) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) {
     // No data rows or only header
     return;
   }
@@ -32,75 +88,84 @@ export function sortPostsBySchedule(
       typeof header === "string" && header.toLowerCase() === "postschedule"
   );
 
-  // Check if 'postSchedule' column exists
   if (postScheduleIndex === -1) {
     Logger.log(
       "Error in sortPostsBySchedule: 'postSchedule' column not found in the header."
     );
-    // Optionally throw an error or handle differently
-    // throw new Error("'postSchedule' column not found.");
-    return; // Exit if column not found
+    return;
   }
 
-  // Get data (excluding header)
-  const dataRange = sheet.getRange(
-    2,
-    1,
-    sheet.getLastRow() - 1,
-    sheet.getLastColumn()
-  );
+  // Get data range (excluding header)
+  const dataRange = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn());
   const data = dataRange.getValues();
 
-  // Split rows based on the dynamically found postSchedule column
-  const withSchedule = data.filter(
-    (row) => row[postScheduleIndex] && row[postScheduleIndex] instanceof Date
-  );
-  const withoutSchedule = data.filter(
-    (row) =>
-      !row[postScheduleIndex] || !(row[postScheduleIndex] instanceof Date)
-  );
+  // Sort the entire data array directly using Infinity for non-dates
+  data.sort((a, b) => {
+    let dateA: Date | null = null;
+    let dateB: Date | null = null;
+    const valA = a[postScheduleIndex];
+    const valB = b[postScheduleIndex];
 
-  // Sort rows with postSchedule by date using the dynamic index
-  withSchedule.sort((a, b) => {
-    const dateA = a[postScheduleIndex];
-    const dateB = b[postScheduleIndex];
-    // Basic check to ensure they are Date objects before comparing
-    if (dateA instanceof Date && dateB instanceof Date) {
-      return dateA.getTime() - dateB.getTime();
-    } else if (dateA instanceof Date) {
-      return -1; // Place valid dates before invalid ones
-    } else if (dateB instanceof Date) {
-      return 1; // Place valid dates before invalid ones
-    } else {
-      return 0; // Keep order if both are invalid/not dates
+    // Attempt to get valid Date object for A
+    if (valA instanceof Date && !isNaN(valA.getTime())) {
+      dateA = valA;
+    } else if (typeof valA === "string" && valA.trim() !== "") {
+      const parsedA = new Date(valA);
+      if (!isNaN(parsedA.getTime())) {
+        dateA = parsedA;
+      }
     }
+
+    // Attempt to get valid Date object for B
+    if (valB instanceof Date && !isNaN(valB.getTime())) {
+      dateB = valB;
+    } else if (typeof valB === "string" && valB.trim() !== "") {
+      const parsedB = new Date(valB);
+      if (!isNaN(parsedB.getTime())) {
+        dateB = parsedB;
+      }
+    }
+
+    // Assign timestamp or Infinity based on validity
+    const timeA = dateA ? dateA.getTime() : Infinity;
+    const timeB = dateB ? dateB.getTime() : Infinity;
+
+    const comparisonResult = timeA - timeB;
+
+    // --- Detailed Comparison Logging (Keep for verification) ---
+    Logger.log(
+      `[Sort Compare] valA: ${valA} (ParsedDate: ${
+        dateA?.toISOString() || "Invalid"
+      }, Time: ${timeA}) | valB: ${valB} (ParsedDate: ${
+        dateB?.toISOString() || "Invalid"
+      }, Time: ${timeB}) | Result: ${comparisonResult}`
+    );
+
+    // Handle cases where both are non-dates (Infinity)
+    if (timeA === Infinity && timeB === Infinity) {
+      return 0; // Maintain relative order of non-dates
+    }
+
+    // Compare the times (finite numbers will always be less than Infinity)
+    return timeA - timeB;
   });
 
-  // Combine sorted rows
-  const sortedData = [...withSchedule, ...withoutSchedule];
-
-  // Write back to the sheet (only if data exists)
-  if (sortedData.length > 0) {
-    sheet
-      .getRange(2, 1, sortedData.length, sortedData[0].length)
-      .setValues(sortedData);
+  // Write back the sorted data
+  if (data.length > 0) {
+    // --- Logging before setValues (Keep for verification) ---
+    data.forEach((row, index) =>
+      Logger.log(
+        `  Row ${index + 2}: ${
+          row[postScheduleIndex] instanceof Date
+            ? row[postScheduleIndex].toISOString() // Log date as ISO string
+            : row[postScheduleIndex] // Log non-date as is
+        }`
+      )
+    );
+    // --- End of logging ---
+    dataRange.setValues(data);
   }
-}
-
-/**
- * エラーメールを送信する関数
- * @param {string} body メール本文
- * @param {string} subject メール件名
- */
-export function sendErrorEmail(body: string, subject: string): void {
-  const emailAddress = Session.getActiveUser()?.getEmail(); // 実行ユーザーのメールアドレスを取得
-  if (!emailAddress) return; // メールアドレスが取得できない場合は終了
-
-  MailApp.sendEmail({
-    to: emailAddress,
-    subject: `${GAS_X_AUTO_POST} ${subject}`,
-    body: body,
-  });
+  Logger.log(`[sortPostsBySchedule] Sorted ${data.length} rows.`);
 }
 
 /**
