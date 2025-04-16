@@ -19,7 +19,7 @@
       "google-apps-script",
       "jest" // 追加: Jest の型定義を使用
     ], // Apps Script の型定義を使用
-    "lib": ["es2015", "dom"] //  追加: ES2015 (またはそれ以降) のライブラリ定義を含める
+    "lib": ["es2019", "dom"] //  追加: ES2015 (またはそれ以降) のライブラリ定義を含める
   },
   "include": [
     "src/**/*.ts", // コンパイル対象の TypeScript ファイル (src フォルダ以下)

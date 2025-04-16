@@ -166,8 +166,7 @@ async function autoPostToX() {
       const content = postData[contentIndex] as string;
       const mediaUrls = postData[mediaUrlsIndex] as string;
       const inReplyToInternal = postData[inReplyToInternalIndex] as string;
-      const postId = postData[postIdIndex] as string; // 投稿済みかどうかのチェック用
-      // const inReplyToOnX = postData[inReplyToOnXIndex]; // これはPostedシートで管理
+      const postId = postData[postIdIndex] as string; // 投稿済みID または "ERROR"
 
       // --- IDがないデータはスキップ ---
       if (!id) {
@@ -186,10 +185,15 @@ async function autoPostToX() {
         continue;
       }
 
-      // --- 1. 投稿済みチェック ---
-      if (postId) {
-        // Logger.log(`Post ${id} already posted (ID: ${postId}). Skipping.`); // 通常はログ不要
-        continue;
+      // --- 1. 投稿済み または エラー済み チェック (修正) ---
+      if (postId && postId.trim() !== "") {
+        // postId が空でない場合 (投稿済みID または "ERROR")
+        if (postId.toUpperCase() === "ERROR") {
+          Logger.log(`Post ${id} previously failed. Skipping.`);
+        } else {
+          // Logger.log(`Post ${id} already posted (ID: ${postId}). Skipping.`); // 通常はログ不要
+        }
+        continue; // 次の投稿へ
       }
 
       // --- 2. 有効な投稿予定時刻かチェック ---
@@ -208,14 +212,18 @@ async function autoPostToX() {
             throw new Error(`Invalid date string: "${postScheduleValue}"`);
           }
         } else {
-          throw new Error(`Missing or invalid Post Schedule value.`);
+          Logger.log(
+            `Skipping post ${id} due to missing or invalid postSchedule value.`
+          );
+          continue; // 次の投稿へ
         }
       } catch (e: any) {
-        const context = `Post Schedule Error (Post ID: ${id})`;
+        // Date オブジェクトの getTime() などで予期せぬエラーが発生した場合のみログに残す
+        const context = `Unexpected Error Parsing Schedule (Post ID: ${id})`;
         logErrorToSheet(e, context);
         const errorMessage = `${context}: ${e.message}`;
         Logger.log(errorMessage);
-        // sendErrorEmail(errorMessage, "Post Schedule Error"); // 必要であればメール通知
+        // この場合もエラーマークは付けずにスキップ
         continue; // 次の投稿へ
       }
 
@@ -324,7 +332,8 @@ async function autoPostToX() {
                 delete rowMapping[id];
                 // 後続の行番号を更新する必要があるが、このループではもう使わない想定
                 postMadeInThisRun = true; // 投稿が成功したフラグを立てる
-                break;
+                // 投稿成功したらこの実行サイクルでは次の投稿へは進まない（元々の break 相当の動作）
+                // break; // If you want to ensure only one post per run, uncomment this. Current logic processes one eligible post then checks remaining.
               } else {
                 // rowMappingにIDがない場合 (通常は起こらないはず)
                 throw new Error(
@@ -340,22 +349,47 @@ async function autoPostToX() {
               );
             }
           } catch (error: any) {
+            // --- 投稿処理中のエラーハンドリング (修正) ---
             const context = `X Post Error (Post ID: ${id})`;
-            logErrorToSheet(error, context);
+            logErrorToSheet(error, context); // エラーをシートに記録
             const errorMessage = `${context}: ${error.message} \nStack: ${error.stack}`;
-            Logger.log(errorMessage);
-            //sendErrorEmail(errorMessage, "X Post Error"); // エラーメール送信
-            // エラーが発生しても次の投稿へ進む (キャッシュはfinallyで削除)
+            Logger.log(errorMessage); // Apps Script ログにも記録
+
+            // エラーが発生した行の postId 列に "ERROR" を書き込む
+            const rowNumber = rowMapping[id];
+            if (rowNumber && postIdIndex !== undefined) {
+              try {
+                postsSheet
+                  .getRange(rowNumber, postIdIndex + 1)
+                  .setValue("ERROR"); // postId 列 (0-based index + 1)
+                Logger.log(`Marked post ${id} as ERROR in Posts sheet.`);
+              } catch (sheetError: any) {
+                // シートへの書き込み自体に失敗した場合
+                Logger.log(
+                  `Failed to mark post ${id} as ERROR in sheet: ${sheetError.message}`
+                );
+                logErrorToSheet(
+                  sheetError,
+                  `Sheet Write Error (Marking Post ${id} as ERROR)`
+                );
+              }
+            } else {
+              Logger.log(
+                `Could not find row number for post ID ${id} in mapping to mark as ERROR.`
+              );
+            }
+            // エラーが発生した場合、現在の実装ではループを継続せず、全体の try...catch に移譲される可能性がある。
+            // もし個々の投稿エラーで停止せず、次の投稿の処理を続けたい場合は、ここで throw せずにループを続ける（ただしキャッシュ削除は必要）。
+            // 現在はエラー発生時に全体の処理が停止する可能性があるため、そのまま throw する。
+            throw error; // エラーを再スローして、必要に応じて上位のcatchで処理
           } finally {
             // 処理中フラグを削除
             cache.remove(processingKey);
           }
         } else {
           // 投稿対象外 (未来すぎる)
-          Logger.log(
-            `Post ${id} scheduled for ${scheduleDate.toISOString()} is not yet due. Skipping.`
-          ); // 通常ログ不要
-          break;
+          // Logger.log(`Post ${id} scheduled for ${scheduleDate.toISOString()} is not yet due. Skipping.`); // 通常ログ不要
+          // break; // If sorted, no need to check further future posts in this run
         }
       } // end if(scheduleDate)
     } // end of for loop
@@ -363,64 +397,56 @@ async function autoPostToX() {
     // --- Check if any scheduled posts remain in the Posts sheet ---
     const remainingPostsData = postsSheet.getDataRange().getValues().slice(1); // Get fresh data after potential deletions
     const scheduleIndexAfterLoop = postsHeaderMap[HEADERS.POST_HEADERS[5]]; // Get schedule index again
+    const postIdIndexAfterLoop = postsHeaderMap[HEADERS.POST_HEADERS[7]]; // Get postId index again
 
     for (const row of remainingPostsData) {
       const scheduleValue = row[scheduleIndexAfterLoop];
+      const postIdValue = row[postIdIndexAfterLoop]; // Check the postId column
+
+      // Skip rows marked as ERROR
+      if (
+        postIdValue &&
+        typeof postIdValue === "string" &&
+        postIdValue.toUpperCase() === "ERROR"
+      ) {
+        continue;
+      }
+
+      // Check for valid schedule date (either Date object or parsable string)
       if (
         scheduleValue &&
         scheduleValue instanceof Date &&
         !isNaN(scheduleValue.getTime())
       ) {
-        // Found a row with a valid schedule date
         hasScheduledPosts = true;
-        break; // No need to check further
+        break; // Found a valid scheduled post, no need to check further
       } else if (
         typeof scheduleValue === "string" &&
         scheduleValue.trim() !== ""
       ) {
-        // Also consider valid date strings
         const parsedDate = new Date(scheduleValue.trim());
         if (!isNaN(parsedDate.getTime())) {
           hasScheduledPosts = true;
-          break;
+          break; // Found a valid scheduled post, no need to check further
         }
       }
     }
 
     // --- Delete trigger if no scheduled posts are left ---
-    if (!hasScheduledPosts && remainingPostsData.length > 0) {
-      // Check if sheet is not empty but has no scheduled posts
+    if (!hasScheduledPosts) {
       Logger.log(
-        "No remaining posts with valid schedules found. Attempting to delete the autoPostToX trigger."
+        "No valid, non-error scheduled posts found. Attempting to delete the autoPostToX trigger."
       );
       const deleted = deleteTriggerByHandler(HANDLER_FUNCTION_NAME);
       if (deleted) {
-        Logger.log(
-          "Successfully deleted the autoPostToX trigger as no scheduled posts remain."
-        );
-      } else {
-        Logger.log(
-          "Could not delete the autoPostToX trigger (might not exist or error occurred)."
-        );
-      }
-    } else if (remainingPostsData.length === 0) {
-      Logger.log(
-        "Posts sheet is empty. Attempting to delete the autoPostToX trigger."
-      );
-      const deleted = deleteTriggerByHandler(HANDLER_FUNCTION_NAME);
-      if (deleted) {
-        Logger.log(
-          "Successfully deleted the autoPostToX trigger as the Posts sheet is empty."
-        );
+        Logger.log("Successfully deleted the autoPostToX trigger.");
       } else {
         Logger.log(
           "Could not delete the autoPostToX trigger (might not exist or error occurred)."
         );
       }
     } else {
-      Logger.log(
-        "Scheduled posts still exist or sheet is empty. Trigger remains active."
-      );
+      Logger.log("Valid scheduled posts still exist. Trigger remains active.");
     }
 
     // --- Postedシートのソート (変更なし) ---
