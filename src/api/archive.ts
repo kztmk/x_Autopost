@@ -50,6 +50,7 @@ export function archiveSheet(sourceSheetName, newSheetName) {
 
   // --- アーカイブファイルの特定または作成 ---
   let archiveSpreadsheet;
+  let isNewArchiveFile = false; // Flag to track if the archive file was newly created
   const files = DriveApp.getFilesByName(ARCHIVE_FILE_NAME);
 
   if (files.hasNext()) {
@@ -78,20 +79,10 @@ export function archiveSheet(sourceSheetName, newSheetName) {
     // ファイルが見つからない場合、新規作成
     try {
       archiveSpreadsheet = SpreadsheetApp.create(ARCHIVE_FILE_NAME);
+      isNewArchiveFile = true; // Mark as newly created
       Logger.log(
         `Archive file "${ARCHIVE_FILE_NAME}" not found. Created a new one (ID: ${archiveSpreadsheet.getId()}).`
       );
-      // オプション: 新規作成時に存在するデフォルトシート('シート1'など)を削除する場合
-      const defaultSheet = archiveSpreadsheet.getSheets()[0];
-      if (
-        archiveSpreadsheet.getSheets().length === 1 &&
-        defaultSheet.getName() === "シート1"
-      ) {
-        archiveSpreadsheet.deleteSheet(defaultSheet);
-        Logger.log(
-          "Deleted default 'シート1' from the newly created archive file."
-        );
-      }
     } catch (e) {
       Logger.log(
         `Error creating new archive file "${ARCHIVE_FILE_NAME}": ${e}`
@@ -114,6 +105,35 @@ export function archiveSheet(sourceSheetName, newSheetName) {
       Logger.log(
         `Sheet "${sourceSheetName}" successfully copied to "${ARCHIVE_FILE_NAME}" as "${newSheetName}".`
       );
+
+      // --- Delete default 'シート1' if the archive file was newly created ---
+      if (isNewArchiveFile) {
+        try {
+          const defaultSheet = archiveSpreadsheet.getSheetByName("シート1");
+          // Check if 'シート1' exists and there's more than one sheet total
+          if (defaultSheet && archiveSpreadsheet.getSheets().length > 1) {
+            archiveSpreadsheet.deleteSheet(defaultSheet);
+            Logger.log(
+              "Deleted default 'シート1' from the newly created archive file after copying."
+            );
+          }
+        } catch (deleteError) {
+          // Log error if deletion fails, but don't stop the overall success
+          Logger.log(`Could not delete default 'シート1': ${deleteError}`);
+        }
+      }
+      // ------------------------------------------------------------------
+
+      // --- Delete the original source sheet ---
+      try {
+        ss.deleteSheet(sourceSheet);
+        Logger.log(`Successfully deleted original source sheet "${sourceSheetName}".`);
+      } catch (deleteSourceError: any) {
+        // Log error if source sheet deletion fails, but consider the archive successful
+        Logger.log(`Failed to delete original source sheet "${sourceSheetName}": ${deleteSourceError}`);
+        // Optionally, modify the success message or status if source deletion failure is critical
+      }
+      // ----------------------------------------
 
       // 成功レスポンスを返す
       return {

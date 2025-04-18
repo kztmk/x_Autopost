@@ -1,6 +1,7 @@
 import {
   PostError,
   XPostData,
+  XPostedData,
   PostScheduleUpdate,
   UpdateResult,
   PostDeletion,
@@ -512,11 +513,11 @@ function fetchPostedData() {
   const headers = values[0].map((header) => String(header).trim()); // ヘッダー名を文字列に変換し、前後の空白を削除
 
   // データ行 (ヘッダーを除く) をオブジェクトの配列に変換
-  const postedDataList: XPostData[] = [];
+  const postedDataList: XPostedData[] = [];
   for (let i = 1; i < values.length; i++) {
     // i = 1 から開始してヘッダー行をスキップ
     const row = values[i];
-    const postedData: XPostData = {};
+    const postedData: Partial<XPostedData> = {};
 
     // ヘッダーに基づいてオブジェクトを構築
     for (let j = 0; j < headers.length; j++) {
@@ -531,6 +532,8 @@ function fetchPostedData() {
         } else if (header === "postSchedule" && value instanceof Date) {
           // postScheduleもDateオブジェクトの場合があるかもしれないので変換
           value = value.toISOString();
+        } else if (header === "postedAt" && value instanceof Date) {
+          value = value.toISOString();
         }
         postedData[header] = value;
       }
@@ -538,7 +541,7 @@ function fetchPostedData() {
 
     // idフィールドが存在し、空でない行のみを結果に含める（任意）
     if (postedData.id) {
-      postedDataList.push(postedData);
+      postedDataList.push(postedData as XPostedData);
     } else {
       Logger.log(
         `Skipping row ${i + 1} in ${SHEETS.POSTED} due to missing or empty id.`

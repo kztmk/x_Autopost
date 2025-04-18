@@ -15,6 +15,12 @@ export interface XPostData {
   contents?: string;
   media?: string;
   inReplyToInternal?: string;
+  postId?: string;
+  inReplyToOnX?: string;
+}
+
+export interface XPostedData extends XPostData {
+  postedAt: string;
 }
 
 export interface TriggerProps {
