@@ -224,7 +224,7 @@ function doPost(e) {
 
               // 配列の各要素の基本検証（最低限のプロパティチェック）
               for (const post of createArray) {
-                if (!post.postSchedule || !post.postTo || !post.contents) {
+                if (!post.postTo || !post.contents) {
                   statusCode = 400;
                   throw new Error(
                     `Each post must have postSchedule, postTo, and contents properties. Invalid post: ${JSON.stringify(
