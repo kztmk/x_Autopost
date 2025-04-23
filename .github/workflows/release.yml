@@ -32,16 +32,16 @@ jobs:
         id: create_release
         uses: actions/create-release@v1
         with:
-          tag_name: v${{ github.run_number }}
+          token: ${{ secrets.PAT_TOKEN }}
+          tag_name: 1.0.v${{ github.run_number }}
           release_name: Release ${{ github.run_number }}
           draft: false
           prerelease: false
-        env:
-          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
 
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
         with:
+          token: ${{ secrets.PAT_TOKEN }}
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./release/x-autopost-${{ github.run_number }}.zip
           asset_name: x-autopost-${{ github.run_number }}.zip
