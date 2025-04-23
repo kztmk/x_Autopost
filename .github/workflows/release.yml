@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+permissions:
+  contents: write # リリース作成／アセット管理に必要
+  packages: write # （必要
+
 jobs:
   build_and_release:
     runs-on: ubuntu-latest
