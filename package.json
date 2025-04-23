@@ -7,6 +7,7 @@
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "deploy": "npm run bundle && npm run modify && npm run push",
+    "release": "npm run bundle && run modify",
     "bundle": "node esbuild.config.js",
     "modify": "node modify-codejs.js",
     "push": "npm run copy-dist && clasp push && npm run cleanup-dist-copy",
