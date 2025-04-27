@@ -241,29 +241,27 @@ function checkTriggerExists(functionName) {
     }
 
     // 成功レスポンス
-    return ContentService.createTextOutput(
-      JSON.stringify({
-        status: "success",
+    return {
+      status: "success",
+      data: {
         functionName: functionName,
         triggerFound: triggerFound,
         triggerId: foundTriggerId, // 見つかったトリガーのID
-        intervalMinutes: intervalMinutes, // 時間ベースでプロパティが見つかった場合のみ数値、それ以外は null
-        message: triggerFound
-          ? `Trigger for function '${functionName}' found.`
-          : `No trigger found for function '${functionName}'.`,
-        code: 200,
-      })
-    ).setMimeType(ContentService.MimeType.JSON);
+        intervalMinutes: intervalMinutes,
+      }, // 時間ベースでプロパティが見つかった場合のみ数値、それ以外は null
+      message: triggerFound
+        ? `Trigger for function '${functionName}' found.`
+        : `No trigger found for function '${functionName}'.`,
+      code: 200,
+    };
   } catch (e: any) {
     Logger.log(`Error checking triggers for function ${functionName}: ${e}`);
-    return ContentService.createTextOutput(
-      JSON.stringify({
-        status: "error",
-        message: `Failed to check triggers for function ${functionName}: ${e.message}`,
-        error: e.toString(),
-        code: 500, // Internal Server Error
-      })
-    ).setMimeType(ContentService.MimeType.JSON);
+    return {
+      status: "error",
+      message: `Failed to check triggers for function ${functionName}: ${e.message}`,
+      error: e.toString(),
+      code: 500, // Internal Server Error
+    };
   }
 }
 
