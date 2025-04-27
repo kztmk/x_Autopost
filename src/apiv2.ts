@@ -284,6 +284,7 @@ function doPost(e) {
               break;
             case "delete":
               response = deleteAllTriggers();
+              statusCode = 201; // OK
               break;
             case "getStatus":
               response = checkTriggerExists(e.parameter.functionName);

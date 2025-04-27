@@ -65,30 +65,27 @@ function createTimeBasedTrigger(postData) {
     Logger.log(`Property set: ${newPropertyKey} = ${intervalMinutes}`);
 
     // 成功レスポンス
-    return ContentService.createTextOutput(
-      JSON.stringify({
-        status: "success",
-        message: `Time-based trigger created successfully for '${handlerFunction}' to run every ${intervalMinutes} minutes.`,
+    return {
+      status: "success",
+      message: `Time-based trigger created successfully for '${handlerFunction}' to run every ${intervalMinutes} minutes.`,
+      data: {
         intervalMinutes: intervalMinutes,
-        handlerFunction: handlerFunction,
+        functionName: handlerFunction,
         triggerId: newTriggerId,
-        deletedExistingCount: deletedExistingCount,
-        deletedTriggerIds: deletedTriggerIds, // 削除したIDのリストも返す
-      })
-    ).setMimeType(ContentService.MimeType.JSON);
+        triggerFount: true,
+      },
+    };
   } catch (error: any) {
     Logger.log(`Error creating time-based trigger: ${error}`);
     // エラーレスポンス
     // Note: もしトリガー作成後にプロパティ保存で失敗した場合、トリガーは残る可能性がある
-    return ContentService.createTextOutput(
-      JSON.stringify({
-        status: "error",
-        message: `Failed to create time-based trigger: ${error.message}`,
-        intervalMinutes: intervalMinutes, // エラー時も入力値を返す
-        error: error.toString(),
-        triggerId: newTriggerId, // 作成試行中にIDが取れていれば返す (通常はnull)
-      })
-    ).setMimeType(ContentService.MimeType.JSON);
+    return {
+      status: "error",
+      message: `Failed to create time-based trigger: ${error.message}`,
+      intervalMinutes: intervalMinutes, // エラー時も入力値を返す
+      error: error.toString(),
+      triggerId: newTriggerId, // 作成試行中にIDが取れていれば返す (通常はnull)
+    };
   }
 }
 
@@ -136,29 +133,28 @@ function deleteAllTriggers() {
     }
 
     // 成功レスポンス
-    return ContentService.createTextOutput(
-      JSON.stringify({
-        status: "success",
-        message: `Successfully deleted ${deletedCount} project trigger(s).`,
-        deletedCount: deletedCount,
-        deletedTriggers: deletedTriggerDetails, // 削除したトリガーの詳細を含める
-        deletedPropertyKeys: deletedPropertyKeys, // 削除したプロパティキーのリスト
-      })
-    ).setMimeType(ContentService.MimeType.JSON);
+    return {
+      status: "success",
+      message: `Successfully deleted ${deletedCount} project trigger(s).`,
+      data: {
+        functionName: "",
+        triggerId: "", // トリガーIDは不要
+        triggerFound: false, // トリガーは削除済み
+        intervalMinutes: -1, // 時間ベースのトリガーは削除済み
+      },
+    };
   } catch (error: any) {
     Logger.log(`Error deleting all triggers: ${error}`);
     // エラーレスポンス
-    return ContentService.createTextOutput(
-      JSON.stringify({
-        status: "error",
-        message: `Failed to delete all triggers: ${error.message}`,
-        // エラー発生までに削除できたトリガーやプロパティに関する情報は部分的な可能性あり
-        partiallyDeletedCount: deletedCount,
-        partiallyDeletedTriggers: deletedTriggerDetails,
-        partiallyDeletedPropertyKeys: deletedPropertyKeys,
-        error: error.toString(),
-      })
-    ).setMimeType(ContentService.MimeType.JSON);
+    return {
+      status: "error",
+      message: `Failed to delete all triggers: ${error.message}`,
+      // エラー発生までに削除できたトリガーやプロパティに関する情報は部分的な可能性あり
+      partiallyDeletedCount: deletedCount,
+      partiallyDeletedTriggers: deletedTriggerDetails,
+      partiallyDeletedPropertyKeys: deletedPropertyKeys,
+      error: error.toString(),
+    };
   }
 }
 
