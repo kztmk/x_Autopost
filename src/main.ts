@@ -156,7 +156,7 @@ async function autoPostToX() {
     const scheduleIndex = postsHeaderMap[HEADERS.POST_HEADERS[5]];
     const inReplyToInternalIndex = postsHeaderMap[HEADERS.POST_HEADERS[6]];
     const postIdIndex = postsHeaderMap[HEADERS.POST_HEADERS[7]]; // 投稿済みIDの列
-    // const inReplyToOnXIndex = postsHeaderMap[HEADERS.POST_HEADERS[8]]; // Postsシートには基本的に無い想定だが念のため
+    const inReplyToOnXIndex = postsHeaderMap[HEADERS.POST_HEADERS[8]]; // Postsシートには基本的に無い想定だが念のため
 
     for (const postData of postsData) {
       // --- 各投稿データの取得 (インデックス使用) ---
@@ -167,6 +167,10 @@ async function autoPostToX() {
       const mediaUrls = postData[mediaUrlsIndex] as string;
       const inReplyToInternal = postData[inReplyToInternalIndex] as string;
       const postId = postData[postIdIndex] as string; // 投稿済みID または "ERROR"
+      const inReplyToOnX =
+        inReplyToOnXIndex !== undefined
+          ? (postData[inReplyToOnXIndex] as string)
+          : ""; // 投稿済みのリプライ先ID
 
       // --- IDがないデータはスキップ ---
       if (!id) {
@@ -253,7 +257,18 @@ async function autoPostToX() {
 
             // --- リプライ先ID取得 (改善) ---
             let replyToPostId: string | null = null;
-            if (inReplyToInternal) {
+            // 1. inReplyToOnX 列に有効な数字があるかチェック
+            if (inReplyToOnX && /^\d+$/.test(inReplyToOnX.trim())) {
+              replyToPostId = inReplyToOnX.trim();
+              Logger.log(
+                `Using direct numeric value from inReplyToOnX as replyToPostId: ${replyToPostId}`
+              );
+            }
+            // 2. inReplyToOnX が無効な場合のみ、inReplyToInternal をチェック
+            else if (inReplyToInternal && inReplyToInternal.trim() !== "") {
+              Logger.log(
+                `inReplyToOnX is empty or not numeric. Checking inReplyToInternal (${inReplyToInternal})...`
+              );
               // まずPostedシートから検索
               replyToPostId = getReplyToPostId(postedSheet, inReplyToInternal);
               // 見つからなければPostsシートからも検索 (同一バッチ内のリプライ用)
