@@ -298,9 +298,7 @@ function deleteTriggerByHandler(handlerName: string): boolean {
       Logger.log(`No trigger found for handler '${handlerName}'.`);
     }
   } catch (error: any) {
-    Logger.log(
-      `Error deleting trigger for handler '${handlerName}': ${error}`
-    );
+    Logger.log(`Error deleting trigger for handler '${handlerName}': ${error}`);
     // Depending on requirements, you might want to re-throw or handle differently
   }
   return deleted;

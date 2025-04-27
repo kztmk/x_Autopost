@@ -285,6 +285,10 @@ function doPost(e) {
             case "delete":
               response = deleteAllTriggers();
               break;
+            case "getStatus":
+              response = checkTriggerExists(requestData.functionName);
+              statusCode = 200; // OK
+              break;
             default:
               statusCode = 400; // Bad Request
               throw new Error(`Invalid target '${target}'`);
