@@ -181,13 +181,11 @@ function checkTriggerExists(functionName) {
     functionName.trim() === ""
   ) {
     // エラーの場合は例外ではなくJSONレスポンスを返す方が Web アプリとしては一般的
-    return ContentService.createTextOutput(
-      JSON.stringify({
-        status: "error",
-        message: "Missing or invalid required parameter: functionName.",
-        code: 400,
-      })
-    ).setMimeType(ContentService.MimeType.JSON);
+    return {
+      status: "error",
+      message: "Missing or invalid required parameter: functionName.",
+      code: 400,
+    };
     // throw new Error("Missing or invalid required parameter: functionName.");
   }
   functionName = functionName.trim();

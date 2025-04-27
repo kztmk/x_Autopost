@@ -286,8 +286,8 @@ function doPost(e) {
               response = deleteAllTriggers();
               break;
             case "getStatus":
-              response = checkTriggerExists(requestData.functionName);
-              statusCode = 200; // OK
+              response = checkTriggerExists(e.parameter.functionName);
+              statusCode = 201; // OK
               break;
             default:
               statusCode = 400; // Bad Request
