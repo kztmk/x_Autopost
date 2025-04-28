@@ -497,7 +497,7 @@ function fetchPostedData() {
   // 共通関数を使用してシート取得または作成
   const sheet = getOrCreateSheetWithHeaders(
     SHEETS.POSTED,
-    HEADERS.POST_HEADERS
+    HEADERS.POSTED_HEADERS
   );
 
   const dataRange = sheet.getDataRange();
