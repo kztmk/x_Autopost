@@ -37,6 +37,7 @@ const MAIN_HEADERS = {
     "inReplytoInternal",
     "postId",
     "inReplyToOnX",
+    "quoteId",
     "postedAt",
   ],
 };
@@ -157,6 +158,7 @@ async function autoPostToX() {
     const inReplyToInternalIndex = postsHeaderMap[HEADERS.POST_HEADERS[6]];
     const postIdIndex = postsHeaderMap[HEADERS.POST_HEADERS[7]]; // 投稿済みIDの列
     const inReplyToOnXIndex = postsHeaderMap[HEADERS.POST_HEADERS[8]]; // Postsシートには基本的に無い想定だが念のため
+    const quoteIdIndex = postsHeaderMap[HEADERS.POST_HEADERS[9]]; // 投稿済みの引用リツイートID
 
     for (const postData of postsData) {
       // --- 各投稿データの取得 (インデックス使用) ---
@@ -171,6 +173,7 @@ async function autoPostToX() {
         inReplyToOnXIndex !== undefined
           ? (postData[inReplyToOnXIndex] as string)
           : ""; // 投稿済みのリプライ先ID
+      const quoteId = postData[quoteIdIndex] as string; // 投稿済みの引用リツイートID
 
       // --- IDがないデータはスキップ ---
       if (!id) {
@@ -301,6 +304,7 @@ async function autoPostToX() {
               content,
               mediaIds,
               replyToPostId,
+              quoteId,
               accountId
             );
 
@@ -492,6 +496,7 @@ async function postTweet(
   content: string,
   mediaIds: string[],
   replyToPostId: string | null,
+  quoteId: string | null,
   accountId: string
 ): Promise<any> {
   // Use the correct property names based on the logged object
@@ -526,6 +531,10 @@ async function postTweet(
   // Add reply settings if replyToPostId exists
   if (replyToPostId) {
     requestBody.reply = { in_reply_to_tweet_id: replyToPostId };
+  }
+  // Add quote settings if quoteId exists
+  if (quoteId && quoteId.trim() !== "") {
+    requestBody.quoted_tweet_id = quoteId.trim();
   }
 
   // 3. 署名キーの生成

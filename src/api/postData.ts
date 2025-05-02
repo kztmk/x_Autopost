@@ -30,6 +30,7 @@ export const HEADERS = {
     "inReplytoInternal",
     "postId",
     "inReplyToOnX",
+    "quoteId",
   ],
 
   POSTED_HEADERS: [
@@ -42,6 +43,7 @@ export const HEADERS = {
     "inReplytoInternal",
     "postId",
     "inReplyToOnX",
+    "quoteId",
     "postedAt",
   ],
   // Errorsシート用のヘッダー列
