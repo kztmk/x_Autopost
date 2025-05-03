@@ -521,6 +521,10 @@ async function postTweet(
   };
 
   // 2. リクエストボディ（ポスト API V２用）
+  // quoteId がある場合には、content に引用リツイートのURLを追加
+  if (quoteId) {
+    content = `${content}\n\n引用リツイート: ${quoteId}`;
+  }
   const requestBody: any = {
     text: content, // Use the 'content' parameter here
   };
@@ -531,10 +535,6 @@ async function postTweet(
   // Add reply settings if replyToPostId exists
   if (replyToPostId) {
     requestBody.reply = { in_reply_to_tweet_id: replyToPostId };
-  }
-  // Add quote settings if quoteId exists
-  if (quoteId && quoteId.trim() !== "") {
-    requestBody.quoted_tweet_id = quoteId.trim();
   }
 
   // 3. 署名キーの生成
