@@ -1,56 +1,25 @@
-// main.js (メインロジック)
-import { logErrorToSheet, sortPostsBySchedule } from "./utils";
-
-import { uploadMediaToX } from "./media";
-import { deleteTriggerByHandler } from "./api/triggers";
-
-import {
-  generateSignature,
-  generateSignatureBaseString,
-  getXAuthById,
-} from "./auth";
-
-import * as api from "./apiv2";
-import * as auth from "./auth";
-import * as media from "./media";
 import * as utils from "./utils";
+import { getXAuthById } from "./auth";
+import { uploadMediaToX } from "./media";
+// Correctly import constants from types.d.ts
+import { HEADERS, MAIN_HEADERS, SHEETS, HeaderMap } from "./types"; // Import HeaderMap type
+import { logErrorToSheet } from "./utils";
 
-// 共通関数と定数をインポート
-import { getOrCreateSheetWithHeaders, SHEETS, HEADERS } from "./api/postData";
+// Object.assign(globalThis, api, auth, media, utils); // 'api' is not defined, and this pattern is generally discouraged. Commenting out.
 
-// 各モジュールのエクスポートをグローバルに割り当てる
-Object.assign(globalThis, api, auth, media, utils);
-
-// X API v2のエンドポイント (必要に応じて変更)
+// X API v2のエンドポイント
 const TWITTER_API_ENDPOINT = "https://api.twitter.com/2/tweets";
+const TWITTER_API_REPOST_ENDPOINT_TEMPLATE =
+  "https://api.twitter.com/2/users/{userId}/retweets";
 
-// main.ts固有のヘッダー定義（必要な場合のみ）
-const MAIN_HEADERS = {
-  // Postedシート用のヘッダー列（postedAt列を追加）
-  POSTED_HEADERS: [
-    "id",
-    "createdAt",
-    "postTo",
-    "contents",
-    "media",
-    "postSchedule",
-    "inReplytoInternal",
-    "postId",
-    "inReplyToOnX",
-    "quoteId",
-    "postedAt",
-  ],
-};
-
-// --- PropertiesService と定数 (関数の外、または共通ライブラリで定義) ---
+// --- PropertiesService と定数 ---
 const scriptProperties = PropertiesService.getScriptProperties();
-const TRIGGER_INTERVAL_PREFIX = "triggerInterval_"; // トリガー作成/削除時と合わせる
-const DEFAULT_TRIGGER_INTERVAL = 5; // プロパティが見つからない場合のデフォルト間隔 (分)
-const HANDLER_FUNCTION_NAME = "autoPostToX"; // 対象のハンドラ関数名
+const TRIGGER_INTERVAL_PREFIX = "triggerInterval_";
+const DEFAULT_TRIGGER_INTERVAL = 5;
+const HANDLER_FUNCTION_NAME = "autoPostToX";
 
 /**
- * 現在実行中の指定されたハンドラ関数のトリガーの間隔（分）を PropertiesService から取得します。
- * 見つからない場合や値が無効な場合はデフォルト値を返します。
+ * トリガーの間隔（分）を PropertiesService から取得します。
  * @param {string} functionName トリガーのハンドラ関数名
  * @returns {number} トリガーの実行間隔 (分)
  */
@@ -75,116 +44,105 @@ function getTriggerIntervalMinutes(functionName: string): number {
             );
           }
         } else {
-          // プロパティが存在しない場合（手動設定など）
           Logger.log(
             `Property key ${propertyKey} not found for trigger ${triggerId} handling ${functionName}. Using default interval.`
           );
         }
-        // 最初に見つかった該当ハンドラのトリガーを採用 (通常は1つのはず)
+        // Found the relevant trigger, no need to check others for this function
         break;
       }
     }
-    // ループで見つからなかった場合（＝指定関数を実行するトリガーがない）
-    Logger.log(
-      `No active trigger found for handler function '${functionName}'. Using default interval.`
-    );
   } catch (e: any) {
     Logger.log(
-      `Error getting trigger interval for ${functionName}: ${e}. Using default interval.`
+      `Error getting trigger interval for ${functionName}: ${e}. Using default.`
     );
   }
-  // デフォルト値を返す
+  // Return default if trigger not found, property not found, value invalid, or error occurred
   Logger.log(
     `Using default trigger interval: ${DEFAULT_TRIGGER_INTERVAL} minutes for ${functionName}.`
   );
   return DEFAULT_TRIGGER_INTERVAL;
 }
 
-// --- 修正後の autoPostToX 関数 ---
+// --- Main Function ---
 async function autoPostToX() {
-  let postMadeInThisRun = false; // Flag to track if a post was made
-  let hasScheduledPosts = false; // Flag to track if there are scheduled posts
   try {
-    // --- シート取得 (変更なし) ---
-    const postsSheet = getOrCreateSheetWithHeaders(
-      SHEETS.POSTS,
-      HEADERS.POST_HEADERS
-    );
-    const postedSheet = getOrCreateSheetWithHeaders(
-      SHEETS.POSTED,
-      MAIN_HEADERS.POSTED_HEADERS
-    );
-    // const errorSheet = getOrCreateSheetWithHeaders(SHEETS.ERRORS, HEADERS.ERROR_HEADERS); // logErrorToSheet 内で処理
+    // Main try block starts here
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const postsSheet = ss.getSheetByName(SHEETS.POSTS);
+    const postedSheet = ss.getSheetByName(SHEETS.POSTED);
+    const errorSheet = ss.getSheetByName(SHEETS.ERRORS);
 
-    // --- Postsシートのソート (変更なし) ---
-    sortPostsBySchedule(postsSheet);
+    if (!postsSheet || !postedSheet || !errorSheet) {
+      throw new Error("Required sheets (Posts, Posted, Errors) not found.");
+    }
 
-    const now = new Date();
-    const nowTime = now.getTime();
+    const postsData = postsSheet.getDataRange().getValues();
+    if (postsData.length <= 1) {
+      Logger.log("No data found in Posts sheet.");
+      return; // No data to process
+    }
+    postsData.shift(); // Remove header row
 
-    // --- トリガー間隔と投稿閾値時刻の計算 ---
-    const triggerIntervalMinutes = getTriggerIntervalMinutes(
-      HANDLER_FUNCTION_NAME
-    );
-    const thresholdMinutes = triggerIntervalMinutes + 1; // トリガー間隔 + 1分
-    const thresholdTime = nowTime + thresholdMinutes * 60 * 1000; // 投稿対象とする未来の時刻上限
-    Logger.log(
-      `Current time: ${now.toISOString()}, Trigger Interval: ${triggerIntervalMinutes} min, Posting Threshold: Now + ${thresholdMinutes} min (${new Date(
-        thresholdTime
-      ).toISOString()})`
-    );
-
-    // --- Postsシートのデータ取得と行マッピング (変更なし) ---
-    const postsData: any[][] = postsSheet.getDataRange().getValues().slice(1);
+    // Build row mapping (ID to Row Number)
     const rowMapping: { [key: string]: number } = {};
     postsData.forEach((row, index) => {
       if (row && row[0]) {
-        // IDが存在することを確認
-        rowMapping[row[0] as string] = index + 2; // A列のIDをキー、行番号 (2始まり) を値とする
+        rowMapping[row[0] as string] = index + 2;
       }
     });
 
-    // Postsシートのヘッダーインデックスを取得 (列の順序に依存しないように)
+    // Postsシートのヘッダーインデックスを取得
     const postsHeaderMap = HEADERS.POST_HEADERS.reduce((map, header, index) => {
       map[header] = index;
       return map;
-    }, {} as { [key: string]: number });
-    const idIndex = postsHeaderMap[HEADERS.POST_HEADERS[0]]; // Assuming ID is the first header
-    const createdAtIndex = postsHeaderMap[HEADERS.POST_HEADERS[1]]; // CreatedAt
-    const postToIndex = postsHeaderMap[HEADERS.POST_HEADERS[2]];
-    const contentIndex = postsHeaderMap[HEADERS.POST_HEADERS[3]];
-    const mediaUrlsIndex = postsHeaderMap[HEADERS.POST_HEADERS[4]];
-    const scheduleIndex = postsHeaderMap[HEADERS.POST_HEADERS[5]];
-    const inReplyToInternalIndex = postsHeaderMap[HEADERS.POST_HEADERS[6]];
-    const postIdIndex = postsHeaderMap[HEADERS.POST_HEADERS[7]]; // 投稿済みIDの列
-    const inReplyToOnXIndex = postsHeaderMap[HEADERS.POST_HEADERS[8]]; // Postsシートには基本的に無い想定だが念のため
-    const quoteIdIndex = postsHeaderMap[HEADERS.POST_HEADERS[9]]; // 投稿済みの引用リツイートID
+    }, {} as HeaderMap); // Use HeaderMap type
+    const idIndex = postsHeaderMap["id"];
+    const createdAtIndex = postsHeaderMap["createdAt"];
+    const postToIndex = postsHeaderMap["postTo"];
+    const contentIndex = postsHeaderMap["contents"];
+    const mediaUrlsIndex = postsHeaderMap["mediaUrls"];
+    const scheduleIndex = postsHeaderMap["postSchedule"];
+    const inReplyToInternalIndex = postsHeaderMap["inReplyToInternal"];
+    const postIdIndex = postsHeaderMap["postId"];
+    const inReplyToOnXIndex = postsHeaderMap["inReplyToOnX"];
+    const quoteIdIndex = postsHeaderMap["quoteId"];
+    const repostTargetIdIndex = postsHeaderMap["repostTargetId"];
+
+    let postMadeInThisRun = false; // Flag to track if any post/repost was made
 
     for (const postData of postsData) {
-      // --- 各投稿データの取得 (インデックス使用) ---
+      // --- 各投稿データの取得 ---
       const id = postData[idIndex] as string;
       const postScheduleValue = postData[scheduleIndex];
       const postTo = postData[postToIndex] as string;
       const content = postData[contentIndex] as string;
       const mediaUrls = postData[mediaUrlsIndex] as string;
       const inReplyToInternal = postData[inReplyToInternalIndex] as string;
-      const postId = postData[postIdIndex] as string; // 投稿済みID または "ERROR"
+      const postId = postData[postIdIndex] as string;
       const inReplyToOnX =
         inReplyToOnXIndex !== undefined
           ? (postData[inReplyToOnXIndex] as string)
-          : ""; // 投稿済みのリプライ先ID
-      const quoteId = postData[quoteIdIndex] as string; // 投稿済みの引用リツイートID
+          : "";
+      const quoteId =
+        quoteIdIndex !== undefined ? (postData[quoteIdIndex] as string) : "";
+      const repostTargetId =
+        repostTargetIdIndex !== undefined
+          ? (postData[repostTargetIdIndex] as string)
+          : "";
 
-      // --- IDがないデータはスキップ ---
+      // --- Basic Checks ---
       if (!id) {
         Logger.log(`Skipping row with missing ID.`);
         continue;
       }
+      const accountId = postTo ? postTo.toLowerCase() : "";
+      if (!accountId) {
+        Logger.log(`Skipping post ${id} due to missing account ID (postTo).`);
+        continue;
+      }
 
-      const accountId = postTo ? postTo.toLowerCase() : ""; // アカウントID（小文字）
-      let scheduleDate: Date | null = null;
-
-      // --- 冪等性のためのキャッシュチェック (変更なし) ---
+      // --- Cache Check ---
       const cache = CacheService.getScriptCache();
       const processingKey = `processing-${id}`;
       if (cache.get(processingKey)) {
@@ -192,306 +150,282 @@ async function autoPostToX() {
         continue;
       }
 
-      // --- 1. 投稿済み または エラー済み チェック (修正) ---
-      if (postId && postId.trim() !== "") {
-        // postId が空でない場合 (投稿済みID または "ERROR")
-        if (postId.toUpperCase() === "ERROR") {
-          Logger.log(`Post ${id} previously failed. Skipping.`);
-        } else {
-          // Logger.log(`Post ${id} already posted (ID: ${postId}). Skipping.`); // 通常はログ不要
-        }
-        continue; // 次の投稿へ
+      // --- Posted/Error Check ---
+      if (postId && postId.trim() !== "" && postId.trim() !== "ERROR") {
+        Logger.log(
+          `Post ${id} has already been posted (postId: ${postId}). Skipping.`
+        );
+        continue;
+      }
+      if (postId && postId.trim() === "ERROR") {
+        Logger.log(`Post ${id} previously resulted in an error. Skipping.`);
+        continue;
       }
 
-      // --- 2. 有効な投稿予定時刻かチェック ---
+      // --- Schedule Date Check ---
+      let scheduleDate: Date | null = null;
       try {
-        if (
-          postScheduleValue instanceof Date &&
-          !isNaN(postScheduleValue.getTime())
-        ) {
+        if (postScheduleValue instanceof Date) {
           scheduleDate = postScheduleValue;
         } else if (
           typeof postScheduleValue === "string" &&
           postScheduleValue.trim() !== ""
         ) {
-          scheduleDate = new Date(postScheduleValue.trim());
+          scheduleDate = new Date(postScheduleValue);
           if (isNaN(scheduleDate.getTime())) {
-            throw new Error(`Invalid date string: "${postScheduleValue}"`);
+            scheduleDate = null;
           }
-        } else {
-          Logger.log(
-            `Skipping post ${id} due to missing or invalid postSchedule value.`
-          );
-          continue; // 次の投稿へ
         }
-      } catch (e: any) {
-        // Date オブジェクトの getTime() などで予期せぬエラーが発生した場合のみログに残す
-        const context = `Unexpected Error Parsing Schedule (Post ID: ${id})`;
-        logErrorToSheet(e, context);
-        const errorMessage = `${context}: ${e.message}`;
-        Logger.log(errorMessage);
-        // この場合もエラーマークは付けずにスキップ
-        continue; // 次の投稿へ
+      } catch (dateError) {
+        scheduleDate = null;
       }
 
-      // --- 3. 時刻条件チェック ---
-      if (scheduleDate) {
-        const scheduleTime = scheduleDate.getTime();
-        const isPastOrPresent = scheduleTime <= nowTime;
-        const isWithinFutureThreshold =
-          scheduleTime > nowTime && scheduleTime <= thresholdTime;
+      if (!scheduleDate) {
+        Logger.log(
+          `Skipping post ${id} due to missing or invalid schedule date.`
+        );
+        continue;
+      }
 
-        // 投稿対象かどうか
-        if (isPastOrPresent || isWithinFutureThreshold) {
-          Logger.log(
-            `Post ${id} scheduled for ${scheduleDate.toISOString()} is eligible for posting. Reason: ${
-              isPastOrPresent ? "Past/Present" : "Within Future Threshold"
-            }`
-          );
+      // --- Time Condition Check ---
+      const now = new Date();
+      // Get trigger interval dynamically
+      const triggerInterval = getTriggerIntervalMinutes(HANDLER_FUNCTION_NAME);
+      const futureThreshold = new Date(now.getTime() + triggerInterval * 60000); // Use dynamic interval
+      const isPastOrPresent = scheduleDate <= now;
+      const isWithinFutureThreshold =
+        scheduleDate > now && scheduleDate <= futureThreshold;
 
-          // 処理中フラグを立てる
-          cache.put(processingKey, "true", 600); // 10分間
+      if (isPastOrPresent || isWithinFutureThreshold) {
+        Logger.log(
+          `Post ${id} scheduled for ${scheduleDate.toISOString()} is eligible...`
+        );
+        cache.put(processingKey, "true", 600); // Set processing flag
 
-          try {
-            // --- メディアアップロード (変更なし) ---
+        let actionTaken: "post" | "repost" | "none" = "none";
+        let replyToPostId: string | null = null; // Keep replyToPostId in scope for postedRowData
+
+        try {
+          // Inner try for post/repost action
+          let response: any;
+
+          // --- Repost Check (優先) ---
+          if (repostTargetId && /^\d+$/.test(repostTargetId.trim())) {
+            const targetTweetId = repostTargetId.trim();
+            Logger.log(
+              `Attempting to repost tweet ID: ${targetTweetId} for internal ID: ${id}, Account: ${accountId}`
+            );
+            response = await repostTweet(targetTweetId, accountId);
+            actionTaken = "repost";
+          }
+          // --- Regular Post/Reply/Quote Check ---
+          else {
+            actionTaken = "post";
             const mediaIds = mediaUrls
               ? await uploadMediaToX(mediaUrls, accountId)
               : [];
 
-            // --- リプライ先ID取得 (改善) ---
-            let replyToPostId: string | null = null;
-            // 1. inReplyToOnX 列に有効な数字があるかチェック
+            // Determine replyToPostId
             if (inReplyToOnX && /^\d+$/.test(inReplyToOnX.trim())) {
               replyToPostId = inReplyToOnX.trim();
               Logger.log(
                 `Using direct numeric value from inReplyToOnX as replyToPostId: ${replyToPostId}`
               );
-            }
-            // 2. inReplyToOnX が無効な場合のみ、inReplyToInternal をチェック
-            else if (inReplyToInternal && inReplyToInternal.trim() !== "") {
+            } else if (inReplyToInternal && inReplyToInternal.trim() !== "") {
               Logger.log(
-                `inReplyToOnX is empty or not numeric. Checking inReplyToInternal (${inReplyToInternal})...`
+                `inReplyToOnX is empty/invalid. Checking inReplyToInternal (${inReplyToInternal})...`
               );
-              // まずPostedシートから検索
-              replyToPostId = getReplyToPostId(postedSheet, inReplyToInternal);
-              // 見つからなければPostsシートからも検索 (同一バッチ内のリプライ用)
-              if (!replyToPostId) {
-                replyToPostId = getReplyToPostId(postsSheet, inReplyToInternal);
-                if (replyToPostId) {
-                  Logger.log(
-                    `Found replyToPostId (${replyToPostId}) for internal ID ${inReplyToInternal} in Posts sheet.`
-                  );
-                }
-              }
+              replyToPostId =
+                getReplyToPostId(postedSheet, inReplyToInternal) ||
+                getReplyToPostId(postsSheet, inReplyToInternal);
               if (!replyToPostId) {
                 Logger.log(
                   `Warning: Could not find reply target post (internal ID: ${inReplyToInternal}) for post ${id}. Posting without reply.`
                 );
-                // エラーにする場合はここで throw new Error(...)
+              } else {
+                Logger.log(
+                  `Found replyToPostId (${replyToPostId}) for internal ID ${inReplyToInternal}.`
+                );
               }
             }
 
-            // --- Xへ投稿 (変更なし) ---
             Logger.log(
-              `Attempting to post tweet for ID: ${id}, Account: ${accountId}, Content: "${content.substring(
-                0,
-                50
-              )}...", Media: ${mediaIds.length > 0}, ReplyTo: ${
-                replyToPostId || "None"
-              }`
+              `Attempting to post tweet for ID: ${id}, Account: ${accountId}...`
             );
-            const response = await postTweet(
+            response = await postTweet(
               content,
               mediaIds,
               replyToPostId,
               quoteId,
               accountId
             );
-
-            // --- 投稿成功後の処理 (改善) ---
-            if (response && response.data && response.data.id) {
-              const newPostIdOnX = response.data.id;
-              const rowNumber = rowMapping[id];
-
-              if (rowNumber) {
-                // 元の行データを取得
-                const originalRowValues = postsSheet
-                  .getRange(rowNumber, 1, 1, postsSheet.getLastColumn())
-                  .getValues()[0];
-
-                // Postedシートに追加するデータを作成 (MAIN_HEADERS.POSTED_HEADERS 順)
-                const postedRowData = MAIN_HEADERS.POSTED_HEADERS.map(
-                  (header) => {
-                    const postHeaderIndex = postsHeaderMap[header];
-                    if (header === "postedAt") {
-                      return new Date(); // 投稿日時
-                    } else if (header === "postId") {
-                      return newPostIdOnX; // Xでの投稿ID
-                    } else if (header === "inReplyToOnX") {
-                      return replyToPostId || ""; // Xでのリプライ先ID
-                    } else if (postHeaderIndex !== undefined) {
-                      // Postsシートに対応する列があればその値
-                      return originalRowValues[postHeaderIndex];
-                    } else {
-                      return ""; // 対応する列がなければ空文字
-                    }
-                  }
-                );
-
-                // Postedシートに追加
-                postedSheet.appendRow(postedRowData);
-                // Postsシートから削除
-                postsSheet.deleteRow(rowNumber);
-
-                Logger.log(
-                  `Post successful for ID: ${id}! X Post ID: ${newPostIdOnX}. Moved to Posted sheet.`
-                );
-
-                // rowMappingから削除された行のエントリを削除（必須ではないが整合性のため）
-                delete rowMapping[id];
-                // 後続の行番号を更新する必要があるが、このループではもう使わない想定
-                postMadeInThisRun = true; // 投稿が成功したフラグを立てる
-                // 投稿成功したらこの実行サイクルでは次の投稿へは進まない（元々の break 相当の動作）
-                // break; // If you want to ensure only one post per run, uncomment this. Current logic processes one eligible post then checks remaining.
-              } else {
-                // rowMappingにIDがない場合 (通常は起こらないはず)
-                throw new Error(
-                  `Internal consistency error: Row number not found in mapping for supposedly existing post ID ${id}.`
-                );
-              }
-            } else {
-              // APIレスポンスが不正な場合
-              throw new Error(
-                `Post failed. Invalid response from X API: ${JSON.stringify(
-                  response
-                )}`
-              );
-            }
-          } catch (error: any) {
-            // --- 投稿処理中のエラーハンドリング (修正) ---
-            const context = `X Post Error (Post ID: ${id})`;
-            logErrorToSheet(error, context); // エラーをシートに記録
-            const errorMessage = `${context}: ${error.message} \nStack: ${error.stack}`;
-            Logger.log(errorMessage); // Apps Script ログにも記録
-
-            // エラーが発生した行の postId 列に "ERROR" を書き込む
-            const rowNumber = rowMapping[id];
-            if (rowNumber && postIdIndex !== undefined) {
-              try {
-                postsSheet
-                  .getRange(rowNumber, postIdIndex + 1)
-                  .setValue("ERROR"); // postId 列 (0-based index + 1)
-                Logger.log(`Marked post ${id} as ERROR in Posts sheet.`);
-              } catch (sheetError: any) {
-                // シートへの書き込み自体に失敗した場合
-                Logger.log(
-                  `Failed to mark post ${id} as ERROR in sheet: ${sheetError.message}`
-                );
-                logErrorToSheet(
-                  sheetError,
-                  `Sheet Write Error (Marking Post ${id} as ERROR)`
-                );
-              }
-            } else {
-              Logger.log(
-                `Could not find row number for post ID ${id} in mapping to mark as ERROR.`
-              );
-            }
-            // エラーが発生した場合、現在の実装ではループを継続せず、全体の try...catch に移譲される可能性がある。
-            // もし個々の投稿エラーで停止せず、次の投稿の処理を続けたい場合は、ここで throw せずにループを続ける（ただしキャッシュ削除は必要）。
-            // 現在はエラー発生時に全体の処理が停止する可能性があるため、そのまま throw する。
-            throw error; // エラーを再スローして、必要に応じて上位のcatchで処理
-          } finally {
-            // 処理中フラグを削除
-            cache.remove(processingKey);
           }
-        } else {
-          // 投稿対象外 (未来すぎる)
-          // Logger.log(`Post ${id} scheduled for ${scheduleDate.toISOString()} is not yet due. Skipping.`); // 通常ログ不要
-          // break; // If sorted, no need to check further future posts in this run
+
+          // --- Success Handling ---
+          const rowNumber = rowMapping[id];
+          if (!rowNumber) {
+            throw new Error(
+              `Internal consistency error: Row number not found for ID ${id}.`
+            );
+          }
+
+          let success = false;
+          let newPostIdOnX = ""; // For X Post ID or repost confirmation
+
+          if (actionTaken === "post" && response?.data?.id) {
+            success = true;
+            newPostIdOnX = response.data.id;
+            Logger.log(
+              `Post successful for ID: ${id}! X Post ID: ${newPostIdOnX}.`
+            );
+          } else if (
+            actionTaken === "repost" &&
+            response?.data?.retweeted === true
+          ) {
+            success = true;
+            newPostIdOnX = `Reposted: ${repostTargetId.trim()}`;
+            Logger.log(
+              `Repost successful for ID: ${id}! Target: ${repostTargetId.trim()}.`
+            );
+          }
+
+          if (success) {
+            const originalRowValues = postsSheet
+              .getRange(rowNumber, 1, 1, postsSheet.getLastColumn())
+              .getValues()[0];
+            const postedRowData = MAIN_HEADERS.POSTED_HEADERS.map((header) => {
+              const postHeaderIndex = postsHeaderMap[header];
+              if (header === "postedAt") {
+                return new Date();
+              }
+              if (header === "postId") {
+                return newPostIdOnX;
+              } // X ID or Repost confirmation
+              if (header === "inReplyToOnX") {
+                return actionTaken === "post" ? replyToPostId || "" : "";
+              } // Only relevant for posts
+              if (header === "quoteId") {
+                return actionTaken === "post" ? quoteId || "" : "";
+              } // Only relevant for posts
+              if (postHeaderIndex !== undefined) {
+                return originalRowValues[postHeaderIndex];
+              }
+              return "";
+            });
+
+            postedSheet.appendRow(postedRowData);
+            postsSheet.deleteRow(rowNumber);
+            Logger.log(`Moved row for ID: ${id} to Posted sheet.`);
+            delete rowMapping[id];
+            postMadeInThisRun = true;
+            // break; // Optional: Stop after one success per run
+          } else {
+            throw new Error(
+              `${
+                actionTaken === "repost" ? "Repost" : "Post"
+              } failed. Invalid/error response: ${JSON.stringify(response)}`
+            );
+          }
+        } catch (error: any) {
+          // Inner catch for post/repost action
+          const context = `X ${
+            actionTaken === "repost" ? "Repost" : "Post"
+          } Error (Post ID: ${id})`;
+          logErrorToSheet(error, context);
+          Logger.log(`${context}: ${error.message}\nStack: ${error.stack}`);
+          const rowNumber = rowMapping[id];
+          if (rowNumber && postIdIndex !== undefined) {
+            postsSheet.getRange(rowNumber, postIdIndex + 1).setValue("ERROR");
+          } else {
+            Logger.log(`Could not mark post ${id} as ERROR in sheet.`);
+          }
+        } finally {
+          // Inner finally
+          cache.remove(processingKey);
         }
-      } // end if(scheduleDate)
-    } // end of for loop
-
-    // --- Check if any scheduled posts remain in the Posts sheet ---
-    const remainingPostsData = postsSheet.getDataRange().getValues().slice(1); // Get fresh data after potential deletions
-    const scheduleIndexAfterLoop = postsHeaderMap[HEADERS.POST_HEADERS[5]]; // Get schedule index again
-    const postIdIndexAfterLoop = postsHeaderMap[HEADERS.POST_HEADERS[7]]; // Get postId index again
-
-    for (const row of remainingPostsData) {
-      const scheduleValue = row[scheduleIndexAfterLoop];
-      const postIdValue = row[postIdIndexAfterLoop]; // Check the postId column
-
-      // Skip rows marked as ERROR
-      if (
-        postIdValue &&
-        typeof postIdValue === "string" &&
-        postIdValue.toUpperCase() === "ERROR"
-      ) {
-        continue;
-      }
-
-      // Check for valid schedule date (either Date object or parsable string)
-      if (
-        scheduleValue &&
-        scheduleValue instanceof Date &&
-        !isNaN(scheduleValue.getTime())
-      ) {
-        hasScheduledPosts = true;
-        break; // Found a valid scheduled post, no need to check further
-      } else if (
-        typeof scheduleValue === "string" &&
-        scheduleValue.trim() !== ""
-      ) {
-        const parsedDate = new Date(scheduleValue.trim());
-        if (!isNaN(parsedDate.getTime())) {
-          hasScheduledPosts = true;
-          break; // Found a valid scheduled post, no need to check further
-        }
-      }
-    }
-
-    // --- Delete trigger if no scheduled posts are left ---
-    if (!hasScheduledPosts) {
-      Logger.log(
-        "No valid, non-error scheduled posts found. Attempting to delete the autoPostToX trigger."
-      );
-      const deleted = deleteTriggerByHandler(HANDLER_FUNCTION_NAME);
-      if (deleted) {
-        Logger.log("Successfully deleted the autoPostToX trigger.");
       } else {
-        Logger.log(
-          "Could not delete the autoPostToX trigger (might not exist or error occurred)."
-        );
+        // Logger.log(`Post ${id} is scheduled for the future. Skipping.`);
       }
-    } else {
-      Logger.log("Valid scheduled posts still exist. Trigger remains active.");
-    }
+    } // End for loop
 
-    // --- Postedシートのソート (変更なし) ---
-    // Only sort if a post might have been added
+    // --- Post-loop actions (Inside main try block) ---
     if (postMadeInThisRun) {
-      sortPostsBySchedule(postedSheet);
-    }
-    Logger.log("Finished autoPostToX cycle.");
-  } catch (e: any) {
-    // --- 全体エラーハンドリング (変更なし) ---
-    const context = "Critical Error in autoPostToX function";
-    logErrorToSheet(e, context);
-    const errorMessage = `${context}: ${e.message} \nStack: ${e.stack}`;
-    Logger.log(errorMessage);
-    // sendErrorEmail(errorMessage, "X Autopost System Critical Error");
-  }
-}
+      // Check remaining posts for trigger deletion
+      const remainingPostsData = postsSheet.getDataRange().getValues().slice(1); // Get fresh data
+      let hasRemainingScheduledPosts = false;
+      const scheduleIndexAfterLoop = postsHeaderMap["postSchedule"]; // Use map
+      if (scheduleIndexAfterLoop !== undefined) {
+        for (const row of remainingPostsData) {
+          const scheduleVal = row[scheduleIndexAfterLoop];
+          if (
+            scheduleVal instanceof Date ||
+            (typeof scheduleVal === "string" && scheduleVal.trim() !== "")
+          ) {
+            try {
+              const dt = new Date(scheduleVal);
+              if (!isNaN(dt.getTime())) {
+                hasRemainingScheduledPosts = true;
+                break;
+              }
+            } catch (e) {
+              /* ignore */
+            }
+          }
+        }
+      } else {
+        Logger.log("Warning: Could not find schedule column index after loop.");
+        // Assume there might be remaining posts if index is missing
+        hasRemainingScheduledPosts = true;
+      }
 
-/**
- * Xにツイートを投稿する。
- * @param {string} content 投稿内容
- * @param {string[]} mediaIds メディアIDの配列 (オプション)
- * @param {string} replyToPostId リプライ先の投稿ID (オプション)
- * @param {string} accountId アカウントID
- * @return {Promise<object>} X APIからのレスポンス
- */
+      if (!hasRemainingScheduledPosts) {
+        Logger.log("No more scheduled posts found. Deleting trigger.");
+        // Ensure deleteTriggerByHandler exists and is correctly imported/available
+        if (utils.deleteTriggerByHandler) {
+          utils.deleteTriggerByHandler(HANDLER_FUNCTION_NAME);
+        } else {
+          Logger.log(
+            "Warning: utils.deleteTriggerByHandler function not found."
+          );
+        }
+      }
+
+      // Sort Posted sheet
+      try {
+        const postedHeaderMap = MAIN_HEADERS.POSTED_HEADERS.reduce(
+          (map, header, index) => {
+            map[header] = index;
+            return map;
+          },
+          {} as HeaderMap
+        );
+        const postedAtIndex = postedHeaderMap["postedAt"];
+        if (postedAtIndex !== undefined && postedSheet.getLastRow() > 1) {
+          postedSheet
+            .getRange(
+              2,
+              1,
+              postedSheet.getLastRow() - 1,
+              postedSheet.getLastColumn()
+            )
+            .sort({ column: postedAtIndex + 1, ascending: false });
+          Logger.log("Sorted Posted sheet by postedAt descending.");
+        }
+      } catch (sortError: any) {
+        Logger.log(`Error sorting Posted sheet: ${sortError}`);
+        logErrorToSheet(sortError, "Error sorting Posted sheet");
+      }
+    } // End if(postMadeInThisRun)
+  } catch (e: any) {
+    // Main catch block
+    Logger.log(
+      `Critical error in autoPostToX: ${e.message}\nStack: ${e.stack}`
+    );
+    logErrorToSheet(e, "Critical error in autoPostToX");
+  }
+} // End autoPostToX
+
+// ... (postTweet function - ensure signature includes quoteId) ...
 async function postTweet(
   content: string,
   mediaIds: string[],
@@ -499,93 +433,70 @@ async function postTweet(
   quoteId: string | null,
   accountId: string
 ): Promise<any> {
-  // Use the correct property names based on the logged object
-  const { apiKey, apiKeySecret, accessToken, accessTokenSecret } =
-    getXAuthById(accountId);
-
-  // This check should now work correctly
-  if (!apiKey || !apiKeySecret || !accessToken || !accessTokenSecret) {
-    throw new Error("APIキーまたはアクセストークンが設定されていません");
+  const authData = getXAuthById(accountId);
+  if (!authData) {
+    throw new Error(`Auth data not found for account: ${accountId}`);
   }
 
-  // 1. OAuthパラメーターの設定（ツイート投稿API V2）
-  const oauthParams = {
-    oauth_consumer_key: apiKey,
-    oauth_token: accessToken,
-    oauth_signature_method: "HMAC-SHA1",
-    oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
-    oauth_nonce: Utilities.base64Encode(
-      Math.random().toString() + Date.now().toString()
-    ),
-    oauth_version: "1.0",
-  };
-
-  // 2. リクエストボディ（ポスト API V２用）
-  // quoteId がある場合には、content に引用リツイートのURLを追加
-  if (quoteId) {
-    content = `${content}\n\n引用リツイート: ${quoteId}`;
-  }
-  const requestBody: any = {
-    text: content, // Use the 'content' parameter here
-  };
-  // Add media only if mediaIds exist and are not empty
+  // NOTE: Ensure OAuth functions exist in utils.ts
+  const oauthParams = utils.generateOAuthParams(authData.consumerKey);
+  const requestBody: any = { text: content };
   if (mediaIds && mediaIds.length > 0) {
     requestBody.media = { media_ids: mediaIds };
   }
-  // Add reply settings if replyToPostId exists
   if (replyToPostId) {
     requestBody.reply = { in_reply_to_tweet_id: replyToPostId };
   }
+  if (quoteId && quoteId.trim() !== "") {
+    requestBody.quote_tweet_id = quoteId.trim();
+  }
 
-  // 3. 署名キーの生成
-  const signingKey = `${encodeURIComponent(apiKeySecret)}&${encodeURIComponent(
-    accessTokenSecret
-  )}`;
-
-  // 4. 署名ベース文字列の生成 (ツイート投稿URLとOAuthパラメータを使用)
-  const signatureBaseString = generateSignatureBaseString(
+  const signingKey = utils.generateSigningKey(
+    authData.consumerSecret,
+    authData.accessTokenSecret
+  );
+  const signatureBaseString = utils.generateSignatureBaseString(
     "POST",
     TWITTER_API_ENDPOINT,
-    oauthParams
-  ); // ツイート投稿URL, OAuth params のみ署名対象 (request body は署名対象外)
-  const oauthSignature = generateSignature(signatureBaseString, signingKey); // 署名を生成
+    oauthParams,
+    {}
+  );
+  const oauthSignature = utils.generateSignature(
+    signatureBaseString,
+    signingKey
+  );
+  oauthParams["oauth_signature"] = oauthSignature;
+  const authHeader = utils.generateOAuthHeader(oauthParams);
 
-  // 5. OAuth認証ヘッダーの生成
-  // @ts-ignore
-  const authHeader = `OAuth ${Object.entries({
-    ...oauthParams,
-    oauth_signature: oauthSignature,
-  })
-    .map(([key, value]) => `${key}="${encodeURIComponent(value)}"`)
-    .join(", ")}`;
-
-  // 6. UrlFetchApp でツイート投稿 API v2 を実行
   const options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
     method: "post",
-    headers: {
-      Authorization: authHeader,
-      "Content-Type": "application/json", // ツイート投稿 API v2 は application/json
-    },
-    payload: JSON.stringify(requestBody), // リクエストボディをJSON文字列に変換
-    muteHttpExceptions: true, // Prevent exceptions for non-2xx responses
+    headers: { Authorization: authHeader, "Content-Type": "application/json" },
+    payload: JSON.stringify(requestBody),
+    muteHttpExceptions: true,
   };
 
   try {
-    // Use fetchWithRetries for resilience
     const response = utils.fetchWithRetries(TWITTER_API_ENDPOINT, options);
     const responseCode = response.getResponseCode();
     const responseText = response.getContentText();
-    const responseJson = JSON.parse(responseText); // Try parsing JSON regardless of code
+    let responseJson: any = {};
+    try {
+      if (responseText) {
+        responseJson = JSON.parse(responseText);
+      }
+    } catch (parseError) {
+      Logger.log(
+        `Warning: Could not parse post API response JSON: ${responseText}`
+      );
+    }
 
     if (responseCode >= 200 && responseCode < 300) {
-      Logger.log(`Tweet posted successfully: ${responseJson?.data?.id}`); // ログ出力
-      return responseJson; // レスポンスを返す
+      Logger.log(`Tweet posted successfully: ${responseJson?.data?.id}`);
+      return responseJson;
     } else {
-      // Handle API errors more gracefully
       Logger.log(
         `Tweet post failed. Status: ${responseCode}, Response: ${responseText}`
       );
-      // Throw a more informative error
       throw new Error(
         `X API Error (${responseCode}): ${
           responseJson?.title || "Unknown error"
@@ -593,32 +504,145 @@ async function postTweet(
       );
     }
   } catch (error: any) {
-    Logger.log("Tweet post error:", error); // エラーログ出力
-    // Re-throw the error so it can be caught by autoPostToX
+    Logger.log("Tweet post error:", error);
     throw error;
   }
 }
 
-/**
- * Posts/Postedシートからリプライ先の投稿ID (postId) を取得する。
- *
- * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet シートオブジェクト
- * @param {string} inReplyToInternal リプライ先の投稿のID (A列の値)
- * @return {string} リプライ先の投稿ID (G列の値、見つからない場合は null)
- */
+// ... (getReplyToPostId function - check indices) ...
 function getReplyToPostId(
   sheet: GoogleAppsScript.Spreadsheet.Sheet,
   inReplyToInternal: string
 ): string | null {
-  const data: any[][] = sheet.getDataRange().getValues();
+  const idColIndex = HEADERS.POST_HEADERS.indexOf("id");
+  const postIdColIndex = HEADERS.POST_HEADERS.indexOf("postId"); // Check against POST_HEADERS for consistency
+
+  if (idColIndex === -1 || postIdColIndex === -1) {
+    Logger.log(
+      `Error in getReplyToPostId (${sheet.getName()}): Could not find header indices (id or postId).`
+    );
+    return null;
+  }
+
+  const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
-    if (data[i][0] === inReplyToInternal) {
-      // A列 (id) を比較
-      Logger.log(
-        `Found reply target postId: ${data[i][7]} for internal ID ${inReplyToInternal}`
-      );
-      return data[i][7] as string; // G列 (postId) を返す
+    if (data[i][idColIndex] === inReplyToInternal) {
+      const foundPostId = data[i][postIdColIndex] as string;
+      // Check if postId is valid (not empty, not "ERROR", not a repost confirmation)
+      if (
+        foundPostId &&
+        foundPostId.trim() !== "" &&
+        foundPostId.trim() !== "ERROR" &&
+        !foundPostId.startsWith("Reposted:")
+      ) {
+        Logger.log(
+          `Found reply target postId: ${foundPostId} for internal ID ${inReplyToInternal} in sheet ${sheet.getName()}`
+        );
+        return foundPostId;
+      } else {
+        // Log even if found but invalid, helps debugging if searching multiple sheets
+        Logger.log(
+          `Found matching internal ID ${inReplyToInternal} in sheet ${sheet.getName()}, but postId column (${postIdColIndex}) is invalid: '${foundPostId}'.`
+        );
+      }
     }
   }
-  return null; // 見つからない場合
+  return null; // Not found or no valid postId found
 }
+
+// --- repostTweet function ---
+async function repostTweet(
+  targetTweetId: string,
+  accountId: string
+): Promise<any> {
+  const authData = getXAuthById(accountId);
+  if (!authData) {
+    throw new Error(`Auth data not found for account: ${accountId}`);
+  }
+  if (!authData.userId) {
+    throw new Error(
+      `User ID not found in auth data for account: ${accountId}. Cannot repost.`
+    );
+  }
+
+  const userId = authData.userId;
+  const repostEndpoint = TWITTER_API_REPOST_ENDPOINT_TEMPLATE.replace(
+    "{userId}",
+    userId
+  );
+
+  // NOTE: Ensure OAuth functions exist in utils.ts
+  const oauthParams = utils.generateOAuthParams(authData.consumerKey);
+  const requestBody = { tweet_id: targetTweetId };
+  const signingKey = utils.generateSigningKey(
+    authData.consumerSecret,
+    authData.accessTokenSecret
+  );
+  const signatureBaseString = utils.generateSignatureBaseString(
+    "POST",
+    repostEndpoint,
+    oauthParams,
+    {}
+  );
+  const oauthSignature = utils.generateSignature(
+    signatureBaseString,
+    signingKey
+  );
+  oauthParams["oauth_signature"] = oauthSignature;
+  const authHeader = utils.generateOAuthHeader(oauthParams);
+
+  const options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
+    method: "post",
+    headers: { Authorization: authHeader, "Content-Type": "application/json" },
+    payload: JSON.stringify(requestBody),
+    muteHttpExceptions: true,
+  };
+
+  try {
+    const response = utils.fetchWithRetries(repostEndpoint, options);
+    const responseCode = response.getResponseCode();
+    const responseText = response.getContentText();
+    let responseJson: any = {};
+    try {
+      if (responseText) {
+        responseJson = JSON.parse(responseText);
+      }
+    } catch (parseError) {
+      Logger.log(
+        `Warning: Could not parse repost API response JSON: ${responseText}`
+      );
+    }
+
+    if (responseCode >= 200 && responseCode < 300) {
+      if (responseJson?.data?.retweeted === true) {
+        Logger.log(`Repost successful for target tweet: ${targetTweetId}`);
+        return responseJson;
+      } else {
+        throw new Error(
+          `Repost API success status (${responseCode}) but unexpected body: ${responseText}`
+        );
+      }
+    } else {
+      let errorDetail = responseText;
+      try {
+        const errorJson = JSON.parse(responseText);
+        errorDetail = `${errorJson?.title || "Unknown error"} - ${
+          errorJson?.detail || responseText
+        }`;
+      } catch (parseError) {
+        /* ignore */
+      }
+      Logger.log(
+        `Repost failed for target ${targetTweetId}. Status: ${responseCode}, Response: ${responseText}`
+      );
+      throw new Error(
+        `X API Error (${responseCode}) during repost: ${errorDetail}`
+      );
+    }
+  } catch (error: any) {
+    Logger.log(`Repost error for target ${targetTweetId}:`, error);
+    throw error;
+  }
+}
+
+// Removed declare const SHEETS... as it's imported

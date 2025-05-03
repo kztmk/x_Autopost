@@ -1,9 +1,9 @@
-// utils.js (ユーティリティ関数)
+// utils.ts (ユーティリティ関数)
 
-const ERROR_SHEET_NAME = "Errors";
+// const ERROR_SHEET_NAME = "Errors"; // Use SHEETS.ERRORS instead
 const GAS_X_AUTO_POST = "[X Auto Post:エラー報告]";
 
-import { SHEETS } from "./api/postData"; // Assuming SHEETS constant is defined here
+import { SHEETS, HEADERS, PostError } from "./types"; // Import from types.d.ts and include HEADERS, PostError
 
 /**
  * Tests the sortPostsBySchedule function on the "Posts" sheet.
@@ -81,16 +81,13 @@ export function sortPostsBySchedule(
     return;
   }
 
-  // Get headers to find the 'postSchedule' column index
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const postScheduleIndex = headers.findIndex(
-    (header) =>
-      typeof header === "string" && header.toLowerCase() === "postschedule"
-  );
+  // Get headers to find the 'postSchedule' column index using HEADERS constant
+  // const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]; // No longer needed if using HEADERS
+  const postScheduleIndex = HEADERS.POST_HEADERS.indexOf("postSchedule");
 
   if (postScheduleIndex === -1) {
     Logger.log(
-      "Error in sortPostsBySchedule: 'postSchedule' column not found in the header."
+      "Error in sortPostsBySchedule: 'postSchedule' column index not found in HEADERS.POST_HEADERS."
     );
     return;
   }
@@ -170,24 +167,37 @@ export function sortPostsBySchedule(
 
 /**
  * エラーをスプレッドシートに記録する
- * @param {Error} error
- * @param {string} context
+ * @param {PostError} errorInfo - エラー情報オブジェクト
+ * @param {string} context - エラーが発生したコンテキスト
  */
-export function logErrorToSheet(error: Error, context: string): void {
+export function logErrorToSheet(errorInfo: PostError, context: string): void {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  // Use SHEETS.ERRORS constant
   const errorSheet =
-    ss.getSheetByName(ERROR_SHEET_NAME) || ss.insertSheet(ERROR_SHEET_NAME);
+    ss.getSheetByName(SHEETS.ERRORS) || ss.insertSheet(SHEETS.ERRORS);
 
   if (errorSheet.getLastRow() === 0) {
-    errorSheet.appendRow([
-      "Timestamp",
-      "Context",
-      "Error Message",
-      "Stack Trace",
-    ]);
+    // Use HEADERS.ERROR_HEADERS for consistency
+    errorSheet.appendRow([...HEADERS.ERROR_HEADERS]);
   }
 
-  errorSheet.appendRow([new Date(), context, error.message, error.stack]);
+  // Map errorInfo properties based on HEADERS.ERROR_HEADERS order
+  const errorRow = HEADERS.ERROR_HEADERS.map(
+    (header) => errorInfo[header as keyof PostError] ?? ""
+  );
+  // Ensure context is included if it's part of the header, or adjust logic
+  // Assuming 'context' is a header in HEADERS.ERROR_HEADERS
+  const contextIndex = HEADERS.ERROR_HEADERS.indexOf("context");
+  if (contextIndex !== -1) {
+    errorRow[contextIndex] = context; // Overwrite context from errorInfo if needed, or add if separate
+  }
+  // Ensure timestamp is included
+  const timestampIndex = HEADERS.ERROR_HEADERS.indexOf("timestamp");
+  if (timestampIndex !== -1 && !errorInfo.timestamp) {
+    errorRow[timestampIndex] = new Date().toISOString(); // Add current timestamp if missing
+  }
+
+  errorSheet.appendRow(errorRow);
 }
 
 /**
@@ -277,4 +287,170 @@ export function maskSensitive(value: string | null | undefined): string {
     return "***";
   }
   return value.substring(0, 3) + "*".repeat(value.length - 3);
+}
+
+/**
+ * Generates a random nonce for OAuth requests.
+ * @returns {string} A random string.
+ */
+function generateNonce(): string {
+  return Utilities.base64Encode(
+    Math.random().toString(36).substring(2) + Date.now().toString(36)
+  ).replace(/[^a-zA-Z0-9]/g, ""); // Ensure alphanumeric
+}
+
+/**
+ * Generates basic OAuth parameters.
+ * @param {string} consumerKey The consumer key.
+ * @returns {object} An object containing basic OAuth parameters.
+ */
+export function generateOAuthParams(consumerKey: string): {
+  [key: string]: string;
+} {
+  return {
+    oauth_consumer_key: consumerKey,
+    oauth_nonce: generateNonce(),
+    oauth_signature_method: "HMAC-SHA1",
+    oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
+    oauth_version: "1.0",
+  };
+}
+
+/**
+ * Generates the signing key for OAuth 1.0a.
+ * @param {string} consumerSecret The consumer secret.
+ * @param {string} tokenSecret The access token secret.
+ * @returns {string} The signing key.
+ */
+export function generateSigningKey(
+  consumerSecret: string,
+  tokenSecret: string
+): string {
+  return (
+    encodeURIComponent(consumerSecret) + "&" + encodeURIComponent(tokenSecret)
+  );
+}
+
+/**
+ * Percent encodes a string according to RFC 3986.
+ * @param {string} str The string to encode.
+ * @returns {string} The encoded string.
+ */
+function rfc3986Encode(str: string): string {
+  return encodeURIComponent(str)
+    .replace(/!/g, "%21")
+    .replace(/\*/g, "%2A")
+    .replace(/\(/g, "%28")
+    .replace(/\)/g, "%29")
+    .replace(/'/g, "%27");
+}
+
+/**
+ * Normalizes request parameters for the OAuth signature base string.
+ * @param {object} params The parameters to normalize.
+ * @returns {string} The normalized parameter string.
+ */
+function normalizeParams(params: { [key: string]: string }): string {
+  return Object.keys(params)
+    .sort()
+    .map((key) => `${rfc3986Encode(key)}=${rfc3986Encode(params[key])}`)
+    .join("&");
+}
+
+/**
+ * Generates the signature base string for OAuth 1.0a.
+ * @param {string} httpMethod The HTTP method (e.g., 'POST', 'GET').
+ * @param {string} baseUrl The base URL of the request.
+ * @param {object} oauthParams The OAuth parameters.
+ * @param {object} requestParams Additional request parameters (query or body).
+ * @returns {string} The signature base string.
+ */
+export function generateSignatureBaseString(
+  httpMethod: string,
+  baseUrl: string,
+  oauthParams: { [key: string]: string },
+  requestParams: { [key: string]: string } = {}
+): string {
+  const allParams = { ...oauthParams, ...requestParams };
+  const normalized = normalizeParams(allParams);
+  return `${httpMethod.toUpperCase()}&${rfc3986Encode(baseUrl)}&${rfc3986Encode(
+    normalized
+  )}`;
+}
+
+/**
+ * Generates the HMAC-SHA1 signature for OAuth 1.0a.
+ * @param {string} baseString The signature base string.
+ * @param {string} signingKey The signing key.
+ * @returns {string} The Base64 encoded signature.
+ */
+export function generateSignature(
+  baseString: string,
+  signingKey: string
+): string {
+  const signatureBytes = Utilities.computeHmacSignature(
+    Utilities.MacAlgorithm.HMAC_SHA_1,
+    baseString,
+    signingKey
+  );
+  return Utilities.base64Encode(signatureBytes);
+}
+
+/**
+ * Generates the OAuth Authorization header string.
+ * @param {object} oauthParams The OAuth parameters including the signature.
+ * @returns {string} The Authorization header value.
+ */
+export function generateOAuthHeader(oauthParams: {
+  [key: string]: string;
+}): string {
+  return (
+    "OAuth " +
+    Object.keys(oauthParams)
+      .sort()
+      .map(
+        (key) => `${rfc3986Encode(key)}="${rfc3986Encode(oauthParams[key])}"`
+      )
+      .join(", ")
+  );
+}
+
+// --- Trigger Management ---
+
+/**
+ * Deletes all project triggers associated with a specific handler function.
+ * @param {string} functionName The name of the handler function whose triggers should be deleted.
+ */
+export function deleteTriggerByHandler(functionName: string): void {
+  try {
+    const triggers = ScriptApp.getProjectTriggers();
+    let deletedCount = 0;
+    for (const trigger of triggers) {
+      if (trigger.getHandlerFunction() === functionName) {
+        const triggerId = trigger.getUniqueId();
+        try {
+          ScriptApp.deleteTrigger(trigger);
+          Logger.log(
+            `Deleted trigger with ID: ${triggerId} for handler: ${functionName}`
+          );
+          deletedCount++;
+        } catch (deleteError: any) {
+          Logger.log(
+            `Failed to delete trigger ${triggerId} for handler ${functionName}: ${deleteError}`
+          );
+          // Optionally log to error sheet
+          // logErrorToSheet(deleteError, `Failed to delete trigger ${triggerId}`);
+        }
+      }
+    }
+    if (deletedCount === 0) {
+      Logger.log(`No triggers found for handler function: ${functionName}`);
+    }
+  } catch (e: any) {
+    Logger.log(
+      `Error accessing or deleting triggers for handler ${functionName}: ${e}`
+    );
+    // Optionally log to error sheet
+    // logErrorToSheet(e, `Error in deleteTriggerByHandler for ${functionName}`);
+  }
 }

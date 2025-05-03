@@ -8,60 +8,22 @@ import {
   DeleteResult,
   XPostDataInput,
   UpdateInReplyToResult,
+  HEADERS, // Import HEADERS
+  SHEETS, // Import SHEETS
 } from "../types";
-
-// シート名の定数
-export const SHEETS = {
-  POSTS: "Posts",
-  POSTED: "Posted",
-  ERRORS: "Errors",
-};
-
-// シート別のヘッダー定義
-export const HEADERS = {
-  // Posts/Postedシート共通のヘッダー列
-  POST_HEADERS: [
-    "id",
-    "createdAt",
-    "postTo",
-    "contents",
-    "media",
-    "postSchedule",
-    "inReplytoInternal",
-    "postId",
-    "inReplyToOnX",
-    "quoteId",
-  ],
-
-  POSTED_HEADERS: [
-    "id",
-    "createdAt",
-    "postTo",
-    "contents",
-    "media",
-    "postSchedule",
-    "inReplytoInternal",
-    "postId",
-    "inReplyToOnX",
-    "quoteId",
-    "postedAt",
-  ],
-  // Errorsシート用のヘッダー列
-  ERROR_HEADERS: ["Timestamp", "Context", "Error Message", "Stack Trace"],
-};
 
 /**
  * 指定された名前のシートを取得し、ない場合は作成してヘッダーを挿入します。
  * 既に存在する場合でもヘッダー行が空なら挿入します。
  *
  * @param {string} sheetName - 取得または作成するシート名
- * @param {string[]} headerColumns - ヘッダー列名の配列
+ * @param {ReadonlyArray<string>} headerColumns - ヘッダー列名の配列 (受け入れる型をReadonlyArrayに変更)
  * @return {GoogleAppsScript.Spreadsheet.Sheet} 取得または作成されたシート
  * @throws {Error} シートの作成または操作に失敗した場合
  */
 export function getOrCreateSheetWithHeaders(
   sheetName: string,
-  headerColumns: string[]
+  headerColumns: ReadonlyArray<string> // Accept ReadonlyArray
 ): GoogleAppsScript.Spreadsheet.Sheet {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(sheetName);
@@ -70,14 +32,15 @@ export function getOrCreateSheetWithHeaders(
   if (!sheet) {
     sheet = ss.insertSheet(sheetName);
     Logger.log(`Sheet "${sheetName}" created.`);
-    sheet.appendRow(headerColumns);
+    // Spread into a mutable array for appendRow
+    sheet.appendRow([...headerColumns]);
     Logger.log(`Header row added to "${sheetName}".`);
-    // シートが非常に大きい場合や権限の問題でフリーズすることがあるため、念のためflush
     SpreadsheetApp.flush();
   } else {
-    // シートが存在する場合、ヘッダー行が存在するかチェック (シートが空の場合のみヘッダーを追加)
+    // シートが存在する場合、ヘッダー行が存在するかチェック
     if (sheet.getLastRow() === 0) {
-      sheet.appendRow(headerColumns);
+      // Spread into a mutable array for appendRow
+      sheet.appendRow([...headerColumns]);
       Logger.log(`Header row added to existing empty sheet "${sheetName}".`);
       SpreadsheetApp.flush();
     }
@@ -91,120 +54,97 @@ export function getOrCreateSheetWithHeaders(
  * シートが存在しない場合は作成し、ヘッダー行を挿入します。
  * 保存時にユニークなIDと作成日時を付与します。
  *
- * @param {XPostData} postDataInput - 保存する投稿データオブジェクト。idとcreatedAtは含まない。
- *   {
- *     postTo: string,
- *     media: string, // JSONをstringifyした文字列
- *     postSchedule: string,
- *     inReplytoInternal?: string, // オプショナル
- *     // postId, inReplyToOnX は初期保存時には通常含まれない
- *   }
- * @return {object} 保存された完全なXPostDataオブジェクト（id, createdAtを含む）。
+ * @param {XPostDataInput} postDataInput - 保存する投稿データオブジェクト。
+ * @return {XPostData} 保存された完全なXPostDataオブジェクト。
  * @throws {Error} 必須フィールドが不足している、または書き込みに失敗した場合。
  */
-function createPostData(postDataInput) {
-  // 共通関数を使用してシート取得または作成
+function createPostData(postDataInput: XPostDataInput): XPostData {
+  // Pass the readonly array directly
   const sheet = getOrCreateSheetWithHeaders(SHEETS.POSTS, HEADERS.POST_HEADERS);
 
-  // 必須フィールドの簡易チェック (必要に応じて追加)
   if (!postDataInput.postTo || !postDataInput.contents) {
-    throw new Error("Missing required fields: postTo and content.");
+    throw new Error("Missing required fields: postTo and contents.");
   }
 
-  // --- データ準備 ---
-  const newId = Utilities.getUuid(); // ユニークIDを生成
-  const createdAt = new Date(); // 現在日時を取得
+  const newId = Utilities.getUuid();
+  const createdAt = new Date();
 
-  // XPostDataオブジェクトを完成させる
-  const newPostData = {
+  // Align with HEADERS.POST_HEADERS from types.d.ts
+  const newPostData: XPostData = {
     id: newId,
-    createdAt: createdAt.toISOString(), // ISO 8601形式の文字列で保存
+    createdAt: createdAt.toISOString(),
     postTo: postDataInput.postTo,
     contents: postDataInput.contents,
-    media: postDataInput.media || "", // mediaがない場合は空文字列
-    postSchedule: postDataInput.postSchedule,
-    inReplytoInternal: postDataInput.inReplytoInternal || "", // 未指定なら空文字列
-    postId: postDataInput.postId || "", // 初期値は空文字列
-    inReplyToOnX: postDataInput.inReplyToOnX || "", // 初期値は空文字列
-    quoteId: postDataInput.quoteId || "", // 初期値は空文字列
+    mediaUrls: postDataInput.mediaUrls || "", // Use mediaUrls
+    postSchedule: postDataInput.postSchedule || "",
+    inReplyToInternal: postDataInput.inReplytoInternal || "",
+    postId: postDataInput.postId || "",
+    inReplyToOnX: postDataInput.inReplyToOnX || "",
+    quoteId: postDataInput.quoteId || "", // Add quoteId
+    repostTargetId: postDataInput.repostTargetId || "", // Add repostTargetId
   };
 
-  // --- シートへの書き込み ---
   try {
-    // ヘッダーの順番に合わせて値の配列を作成
+    // Map values based on the order in HEADERS.POST_HEADERS
     const rowData = HEADERS.POST_HEADERS.map((header) => {
-      return newPostData[header] !== undefined ? newPostData[header] : ""; // 未定義の場合は空文字
+      // Use type assertion for safety
+      return newPostData[header as keyof XPostData] ?? "";
     });
 
     sheet.appendRow(rowData);
 
     Logger.log(`PostData created with ID: ${newId}`);
-    // 保存した完全なデータを返す
     return newPostData;
   } catch (e: any) {
     Logger.log(`Error creating PostData: ${e}`);
-    // Errorシートへの記録などを検討
     throw new Error(`Failed to save PostData to sheet: ${e.message}`);
   }
 }
 
 /**
  * 'Posts' シートに保存されている全てのX投稿データを取得します。
- * @return {XPostData[]} 保存されているXPostDataオブジェクトの配列。データがない場合は空配列。
+ * @return {XPostData[]} 保存されているXPostDataオブジェクトの配列。
  * @throws {Error} シートが見つからない場合。
  */
-function fetchPostData() {
-  // 共通関数を使用してシート取得または作成
+function fetchPostData(): XPostData[] {
+  // Pass the readonly array directly
   const sheet = getOrCreateSheetWithHeaders(SHEETS.POSTS, HEADERS.POST_HEADERS);
 
   const dataRange = sheet.getDataRange();
   const values = dataRange.getValues();
 
-  // データがヘッダー行のみ、または全くない場合
   if (values.length <= 1) {
-    Logger.log(`No data rows found in sheet "${SHEETS.POSTS}".`);
-    return []; // データ行がないので空配列を返す
+    return []; // No data rows
   }
 
-  // ヘッダー行を取得 (最初の行)
-  const headers = values[0].map((header) => String(header).trim()); // ヘッダー名を文字列に変換し、前後の空白を削除
+  // Use HEADERS.POST_HEADERS as the source of truth for headers
+  const headers = HEADERS.POST_HEADERS;
+  const headerMap: { [key: string]: number } = {};
+  headers.forEach((header, index) => {
+    headerMap[header] = index;
+  });
 
-  // データ行 (ヘッダーを除く) をオブジェクトの配列に変換
   const postDataList: XPostData[] = [];
+  // Start from row 1 (index 1) to skip header row
   for (let i = 1; i < values.length; i++) {
-    // i = 1 から開始してヘッダー行をスキップ
     const row = values[i];
-    const postData: XPostData = {};
-
-    // ヘッダーに基づいてオブジェクトを構築
-    for (let j = 0; j < headers.length; j++) {
-      const header = headers[j];
-      // ヘッダー名が空でないことを確認
-      if (header) {
-        let value = j < row.length ? row[j] : ""; // 行に対応するデータがあれば取得、なければ空文字
-
-        // createdAt列の値がDateオブジェクトの場合、ISO文字列に変換
-        // (createPostDataでISO文字列として保存しているため、通常は文字列のはずだが念のため)
-        if (header === "createdAt" && value instanceof Date) {
-          value = value.toISOString();
-        }
-        // 他に特定の型変換が必要な場合はここに追加 (例: 数値に変換したい列など)
-
-        postData[header] = value;
+    // Map row data to object using headerMap
+    const postData: Partial<XPostData> = {};
+    headers.forEach((header) => {
+      const index = headerMap[header];
+      if (index !== undefined && index < row.length) {
+        // Assign value to the corresponding key in postData
+        (postData as any)[header] = row[index];
       }
-    }
+    });
 
-    // idフィールドが存在し、空でない行のみを結果に含める（任意：空行などを除外する場合）
+    // Basic validation (e.g., check if ID exists)
     if (postData.id) {
-      postDataList.push(postData);
+      postDataList.push(postData as XPostData);
     } else {
-      Logger.log(`Skipping row ${i + 1} due to missing or empty id.`);
+      Logger.log(`Skipping row ${i + 1} due to missing ID or invalid data.`);
     }
   }
-
-  Logger.log(
-    `Fetched ${postDataList.length} post data entries from sheet "${SHEETS.POSTS}".`
-  );
   return postDataList;
 }
 
@@ -212,145 +152,85 @@ function fetchPostData() {
  * 'Posts' シートに保存されている指定されたIDのX投稿データを更新します。
  * 更新データにはIDが含まれている必要があります。createdAtは更新されません。
  *
- * @param {XPostData} postDataToUpdate - 更新する投稿データオブジェクト。idフィールドが必須。
- *   {
- *     id: string, // 必須: 更新対象のID
- *     postTo?: string,
- *     media?: string,
- *     postSchedule?: string,
- *     inReplytoInternal?: string,
- *     postId?: string,
- *     inReplyToOnX?: string,
- *     // createdAt は更新対象外
- *   }
- * @return {object} 更新後の完全なXPostDataオブジェクト。
+ * @param {XPostData} postDataToUpdate - 更新する投稿データオブジェクト。
+ * @return {XPostData} 更新後の完全なXPostDataオブジェクト。
  * @throws {Error} シートが見つからない、ヘッダーがない、必須のidがない、
  *                 指定されたIDのデータが見つからない、または更新に失敗した場合。
  */
-function updatePostData(postDataToUpdate) {
-  // 共通関数を使用してシート取得または作成
+function updatePostData(postDataToUpdate: XPostData): XPostData {
+  // Pass the readonly array directly
   const sheet = getOrCreateSheetWithHeaders(SHEETS.POSTS, HEADERS.POST_HEADERS);
-
-  // 更新データにIDが含まれているかチェック
-  if (!postDataToUpdate || !postDataToUpdate.id) {
-    throw new Error('Missing required field "id" in the update data.');
-  }
-  const targetId = postDataToUpdate.id;
-
   const dataRange = sheet.getDataRange();
   const values = dataRange.getValues();
 
-  // ヘッダー行を取得し、列名とインデックスのマッピングを作成
-  if (values.length === 0) {
-    throw new Error(
-      `Sheet "${SHEETS.POSTS}" is empty or header row is missing.`
-    );
+  if (values.length <= 1) {
+    throw new Error(`Sheet '${SHEETS.POSTS}' is empty or has no data.`);
   }
-  const headers = values[0].map((header) => String(header).trim());
-  const headerMap = {};
-  headers.forEach((header, index) => {
-    if (header) {
-      // 空のヘッダー名は無視
-      headerMap[header] = index;
+
+  // Use HEADERS.POST_HEADERS
+  const headers = HEADERS.POST_HEADERS;
+  const idIndex = headers.indexOf("id");
+
+  if (idIndex === -1) {
+    throw new Error("Header 'id' not found in Posts sheet.");
+  }
+  if (!postDataToUpdate.id) {
+    throw new Error("Missing 'id' in postDataToUpdate.");
+  }
+
+  let rowIndex = -1;
+  for (let i = 1; i < values.length; i++) {
+    if (values[i][idIndex] === postDataToUpdate.id) {
+      rowIndex = i;
+      break;
     }
+  }
+
+  if (rowIndex === -1) {
+    throw new Error(`PostData with ID '${postDataToUpdate.id}' not found.`);
+  }
+
+  // Prepare the updated row data based on HEADERS.POST_HEADERS order
+  const updatedRow = headers.map((header) => {
+    // Use updated value if present, otherwise keep original value
+    // Ensure createdAt is not overwritten
+    if (header === "createdAt") {
+      return values[rowIndex][headers.indexOf(header)];
+    }
+    return (
+      postDataToUpdate[header as keyof XPostData] ??
+      values[rowIndex][headers.indexOf(header)] ??
+      ""
+    );
   });
 
-  // ID列とcreatedAt列のインデックスを確認
-  const idColumnIndex = headerMap["id"];
-  const createdAtColumnIndex = headerMap["createdAt"]; // createdAtを保持するためにインデックスを取得
-  if (idColumnIndex === undefined) {
-    throw new Error('Cannot find "id" column in the sheet header.');
-  }
-
-  let targetRowIndex = -1; // 見つかった行のインデックス (0-based in values array)
-  let originalCreatedAt = null; // 元のcreatedAt値を保持する変数
-
-  // データ行を検索して対象IDを見つける (ヘッダー行を除く)
-  for (let i = 1; i < values.length; i++) {
-    const row = values[i];
-    // ID列が存在し、値が一致するか確認
-    if (row.length > idColumnIndex && row[idColumnIndex] === targetId) {
-      targetRowIndex = i;
-      // 元のcreatedAt値を取得（存在すれば）
-      if (
-        createdAtColumnIndex !== undefined &&
-        row.length > createdAtColumnIndex
-      ) {
-        originalCreatedAt = row[createdAtColumnIndex];
-      }
-      break; // 見つかったらループを抜ける
-    }
-  }
-
-  // 対象IDが見つからなかった場合
-  if (targetRowIndex === -1) {
-    throw new Error(
-      `PostData with ID "${targetId}" not found in sheet "${SHEETS.POSTS}".`
-    );
-  }
-
-  // --- 更新処理 ---
   try {
-    // 更新後の行データ配列を作成 (ヘッダーの順番に合わせる)
-    const newRowValues = headers.map((header) => {
-      const headerKey = header; // マップのキーはヘッダー名そのもの
-
-      if (headerKey === "createdAt") {
-        // createdAt は元の値を保持（見つかっていれば）、なければ空文字
-        return originalCreatedAt !== null ? originalCreatedAt : "";
-      } else if (postDataToUpdate.hasOwnProperty(headerKey)) {
-        // 更新データにキーが存在すればその値を使用
-        return postDataToUpdate[headerKey];
-      } else {
-        // 更新データにキーが存在しない場合、元の値を保持 (部分更新に対応する場合)
-        // または、常に postDataToUpdate で全置き換えなら undefined -> '' とする
-        const originalValueIndex = headerMap[headerKey];
-        if (
-          originalValueIndex !== undefined &&
-          values[targetRowIndex].length > originalValueIndex
-        ) {
-          return values[targetRowIndex][originalValueIndex]; // 元の値を返す
-        } else {
-          return ""; // 元の値もなければ空文字
-        }
-        // 備考: 完全な置き換え（postDataToUpdateにないフィールドは空にする）なら以下のようになる:
-        // return postDataToUpdate.hasOwnProperty(headerKey) ? postDataToUpdate[headerKey] : '';
-      }
-    });
-
-    // シート上の該当行を更新 (行番号は 1-based なので +1 する)
-    const targetSheetRow = targetRowIndex + 1;
+    // Update the specific row (rowIndex is 0-based, sheet range is 1-based)
     sheet
-      .getRange(targetSheetRow, 1, 1, newRowValues.length)
-      .setValues([newRowValues]);
+      .getRange(rowIndex + 1, 1, 1, updatedRow.length)
+      .setValues([updatedRow]);
+    Logger.log(`PostData updated for ID: ${postDataToUpdate.id}`);
 
-    Logger.log(`PostData with ID "${targetId}" updated successfully.`);
-
-    // 更新後のデータをオブジェクトとして再構築して返す
-    const updatedPostData = {};
-    headers.forEach((header, index) => {
-      if (header) {
-        updatedPostData[header] = newRowValues[index];
-      }
-    });
-    return updatedPostData;
+    // Fetch the updated data to return the complete object (optional, could construct from updatedRow)
+    // For simplicity, returning the input object which should reflect the update
+    // A more robust approach might re-fetch or construct the object from updatedRow + headers
+    return postDataToUpdate; // Or construct a new object based on updatedRow
   } catch (e: any) {
-    Logger.log(`Error updating PostData with ID "${targetId}": ${e}`);
-    throw new Error(`Failed to update PostData: ${e.message}`);
+    Logger.log(`Error updating PostData for ID ${postDataToUpdate.id}: ${e}`);
+    throw new Error(`Failed to update PostData in sheet: ${e.message}`);
   }
 }
 
 /**
  * 'Posts' シートから指定されたIDのX投稿データを削除します。
- * IDが "all" の場合は、ヘッダーを除く全てのデータ行を削除します。
+ * IDが "all" の場合は、指定された postTo に一致する全てのデータ行を削除します。
  *
- * @param {XPostData} postDataToDelete - 削除対象のIDを含むオブジェクト。idフィールドが必須。
- *   { id: string } // idフィールドのみ使用
+ * @param {PostDeletion} postDataToDelete - 削除対象のID (または "all") と、"all" の場合は postTo を含むオブジェクト。
  * @return {object} 削除成功を示すメッセージ。全削除の場合は削除件数も含む。
- * @throws {Error} シートが見つからない、必須のidがない、対象IDが見つからない(単一削除時)、
+ * @throws {Error} シートが見つからない、必須のid/postToがない、対象IDが見つからない(単一削除時)、
  *                 または削除に失敗した場合。
  */
-function deletePostData(postDataToDelete) {
+function deletePostData(postDataToDelete: PostDeletion): DeleteResult {
   // 共通関数を使用してシート取得または作成
   const sheet = getOrCreateSheetWithHeaders(SHEETS.POSTS, HEADERS.POST_HEADERS);
 
@@ -362,39 +242,43 @@ function deletePostData(postDataToDelete) {
 
   if (targetId === "all") {
     // --- 全削除処理 ---
-    // accountIdを取得
-    if (!postDataToDelete.accountId) {
+    // postTo が指定されているかチェック
+    if (!postDataToDelete.postTo) {
       throw new Error(
-        'Missing required field "accountId" in the delete request body.'
+        'Missing required field "postTo" when deleting all posts.'
       );
     }
-    const targetAccountId = postDataToDelete.accountId;
+    const targetPostTo = postDataToDelete.postTo;
 
     const dataRange = sheet.getDataRange();
     const values = dataRange.getValues();
 
-    // ヘッダー行を取得し、accountId列のインデックスを確認
-    if (values.length === 0) {
-      throw new Error(
-        `Sheet "${SHEETS.POSTS}" is empty or header row is missing.`
-      );
+    // ヘッダー行を取得し、postTo列のインデックスを確認
+    if (values.length <= 1) {
+      // Check if only header exists or empty
+      Logger.log(`Sheet "${SHEETS.POSTS}" is empty or has no data rows.`);
+      return {
+        id: "all",
+        status: "not_found",
+        message: `No data rows found in sheet "${SHEETS.POSTS}".`,
+      };
     }
-    const headers = values[0].map((header) => String(header).trim());
-    const accountIdColumnIndex = headers.indexOf("accountId");
+    // Use HEADERS.POST_HEADERS to find the index
+    const postToColumnIndex = HEADERS.POST_HEADERS.indexOf("postTo");
 
-    if (accountIdColumnIndex === -1) {
-      throw new Error('Cannot find "accountId" column in the sheet header.');
+    if (postToColumnIndex === -1) {
+      throw new Error('Cannot find "postTo" column in the sheet header.');
     }
 
     let rowsToDelete: number[] = [];
 
-    // データ行を検索して対象のaccountIdを持つ行を特定 (ヘッダー行を除く)
+    // データ行を検索して対象のpostToを持つ行を特定 (ヘッダー行を除く)
     for (let i = 1; i < values.length; i++) {
       const row = values[i];
-      // accountId列が存在し、値が一致するか確認
+      // postTo列が存在し、値が一致するか確認
       if (
-        row.length > accountIdColumnIndex &&
-        row[accountIdColumnIndex] === targetAccountId
+        row.length > postToColumnIndex &&
+        row[postToColumnIndex] === targetPostTo
       ) {
         rowsToDelete.push(i + 1); // シート上の行番号は配列インデックス+1
       }
@@ -403,12 +287,12 @@ function deletePostData(postDataToDelete) {
     // 削除対象の行がない場合
     if (rowsToDelete.length === 0) {
       Logger.log(
-        `No data rows to delete for accountId "${targetAccountId}" in sheet "${SHEETS.POSTS}".`
+        `No data rows to delete for postTo "${targetPostTo}" in sheet "${SHEETS.POSTS}".`
       );
       return {
-        status: "success",
-        message: `No data rows found to delete for accountId "${targetAccountId}".`,
-        deletedCount: 0,
+        id: "all", // Indicate it was an 'all' request
+        status: "not_found",
+        message: `No data rows found to delete for postTo "${targetPostTo}".`,
       };
     }
 
@@ -420,19 +304,19 @@ function deletePostData(postDataToDelete) {
       });
 
       Logger.log(
-        `Deleted ${rowsToDelete.length} data rows for accountId "${targetAccountId}" from sheet "${SHEETS.POSTS}".`
+        `Deleted ${rowsToDelete.length} data rows for postTo "${targetPostTo}" from sheet "${SHEETS.POSTS}".`
       );
       return {
-        status: "success",
-        message: `Successfully deleted ${rowsToDelete.length} data rows for accountId "${targetAccountId}".`,
-        deletedCount: rowsToDelete.length,
+        id: "all", // Indicate it was an 'all' request
+        status: "deleted",
+        message: `Successfully deleted ${rowsToDelete.length} data rows for postTo "${targetPostTo}".`,
       };
     } catch (e: any) {
       Logger.log(
-        `Error during bulk deletion of PostData for accountId "${targetAccountId}": ${e}`
+        `Error during bulk deletion of PostData for postTo "${targetPostTo}": ${e}`
       );
       throw new Error(
-        `Failed during bulk deletion of PostData for accountId "${targetAccountId}": ${e.message}`
+        `Failed during bulk deletion of PostData for postTo "${targetPostTo}": ${e.message}`
       );
     }
   } else {
@@ -441,13 +325,11 @@ function deletePostData(postDataToDelete) {
     const values = dataRange.getValues();
 
     // ヘッダー行を取得し、ID列のインデックスを確認
-    if (values.length === 0) {
-      throw new Error(
-        `Sheet "${SHEETS.POSTS}" is empty or header row is missing.`
-      );
+    if (values.length <= 1) {
+      throw new Error(`Sheet "${SHEETS.POSTS}" is empty or has no data rows.`);
     }
-    const headers = values[0].map((header) => String(header).trim());
-    const idColumnIndex = headers.indexOf("id");
+    // Use HEADERS.POST_HEADERS to find the index
+    const idColumnIndex = HEADERS.POST_HEADERS.indexOf("id");
 
     if (idColumnIndex === -1) {
       throw new Error('Cannot find "id" column in the sheet header.');
@@ -467,9 +349,11 @@ function deletePostData(postDataToDelete) {
 
     // 対象IDが見つからなかった場合
     if (sheetRowToDelete === -1) {
-      throw new Error(
-        `PostData with ID "${targetId}" not found in sheet "${SHEETS.POSTS}". Cannot delete.`
-      );
+      return {
+        id: targetId,
+        status: "not_found",
+        message: `PostData with ID "${targetId}" not found in sheet "${SHEETS.POSTS}". Cannot delete.`,
+      };
     }
 
     // --- 削除実行 ---
@@ -479,10 +363,9 @@ function deletePostData(postDataToDelete) {
         `PostData with ID "${targetId}" deleted successfully from row ${sheetRowToDelete}.`
       );
       return {
-        status: "success",
+        id: targetId,
+        status: "deleted",
         message: `PostData with ID "${targetId}" deleted successfully.`,
-        deletedId: targetId,
-        deletedCount: 1,
       };
     } catch (e: any) {
       Logger.log(`Error deleting PostData with ID "${targetId}": ${e}`);
@@ -979,87 +862,72 @@ function deleteMultiplePostData(deletions: PostDeletion[]): DeleteResult[] {
 }
 
 /**
- * 複数の投稿データを 'Posts' シートに一括で作成します。
- * 各データにユニークなIDと作成日時を付与します。
+ * 複数の投稿データを一括で 'Posts' シートに保存します。
  *
- * @param {XPostDataInput[]} postsDataInput - 作成する投稿データの配列 (id, createdAtを含まない)。
- * @return {XPostData[]} 作成された完全なXPostDataオブジェクト (id, createdAtを含む) の配列。
+ * @param {XPostDataInput[]} postsInput - 保存する投稿データオブジェクトの配列。
+ * @return {XPostData[]} 保存された完全なXPostDataオブジェクトの配列。
  * @throws {Error} シートが見つからない、必須フィールドが不足している、または書き込みに失敗した場合。
  */
-function createMultiplePosts(postsDataInput: XPostDataInput[]): XPostData[] {
-  // 共通関数を使用してシート取得または作成
+function createMultiplePosts(postsInput: XPostDataInput[]): XPostData[] {
   const sheet = getOrCreateSheetWithHeaders(SHEETS.POSTS, HEADERS.POST_HEADERS);
+  const results: XPostData[] = [];
+  const rowsToAdd: any[][] = [];
 
-  // 入力データが空の場合は何もせずに終了
-  if (!postsDataInput || postsDataInput.length === 0) {
-    Logger.log("No data provided to create multiple posts.");
-    return [];
-  }
-
-  const createdPosts: XPostData[] = [];
-  const rowsData: any[][] = []; // シートに書き込むための二次元配列
-
-  // --- データ準備 ---
-  for (const postInput of postsDataInput) {
-    // 必須フィールドの簡易チェック (必要に応じてより厳密に)
+  for (const postInput of postsInput) {
     if (!postInput.postTo || !postInput.contents) {
-      // エラーをスローするか、スキップしてログに残すかを選択
+      // Optionally log or handle invalid inputs differently
       Logger.log(
-        `Skipping post due to missing required fields: postTo or contents. Input: ${JSON.stringify(
-          postInput
-        )}`
+        `Skipping post due to missing required fields: postTo or contents.`
       );
-      // results 配列のようなものに失敗情報を追加することもできる
-      continue; // この投稿はスキップ
-      // throw new Error(`Missing required fields (postTo or contents) in one of the input objects: ${JSON.stringify(postInput)}`);
+      continue; // Skip this post
     }
 
     const newId = Utilities.getUuid();
     const createdAt = new Date();
 
-    // 完全なXPostDataオブジェクトを作成
     const newPostData: XPostData = {
       id: newId,
       createdAt: createdAt.toISOString(),
       postTo: postInput.postTo,
       contents: postInput.contents,
-      media: postInput.media || "",
-      postSchedule: postInput.postSchedule || "", // postScheduleがない場合も空文字
+      mediaUrls: postInput.mediaUrls || "", // Corrected: Use mediaUrls
+      postSchedule: postInput.postSchedule || "",
       inReplyToInternal: postInput.inReplytoInternal || "",
+      postId: postInput.postId || "",
+      inReplyToOnX: postInput.inReplyToOnX || "",
+      quoteId: postInput.quoteId || "",
+      repostTargetId: postInput.repostTargetId || "",
     };
 
-    createdPosts.push(newPostData); // 戻り値用の配列に追加
-
-    // シート書き込み用の行データを作成 (ヘッダーの順番に合わせる)
-    const rowData = HEADERS.POST_HEADERS.map((header) => {
-      return newPostData[header as keyof XPostData] !== undefined
-        ? newPostData[header as keyof XPostData]
-        : "";
-    });
-    rowsData.push(rowData);
+    const rowData = HEADERS.POST_HEADERS.map(
+      (header) => newPostData[header as keyof XPostData] ?? ""
+    );
+    rowsToAdd.push(rowData);
+    results.push(newPostData); // Add successfully processed data to results
   }
 
-  // --- シートへの一括書き込み ---
-  if (rowsData.length > 0) {
+  if (rowsToAdd.length > 0) {
     try {
-      const startRow = sheet.getLastRow() + 1; // 次の空行から書き込み開始
-      const numRows = rowsData.length;
-      const numCols = HEADERS.POST_HEADERS.length; // ヘッダーの列数
-
-      sheet.getRange(startRow, 1, numRows, numCols).setValues(rowsData);
-
-      Logger.log(`Successfully created ${rowsData.length} posts.`);
+      // Append all rows at once for better performance
+      sheet
+        .getRange(
+          sheet.getLastRow() + 1,
+          1,
+          rowsToAdd.length,
+          HEADERS.POST_HEADERS.length
+        )
+        .setValues(rowsToAdd);
+      Logger.log(`Created ${rowsToAdd.length} posts successfully.`);
     } catch (e: any) {
-      Logger.log(`Error creating multiple posts with setValues: ${e}`);
-      // Errorシートへの記録などを検討
-      throw new Error(`Failed to save multiple posts to sheet: ${e.message}`);
+      Logger.log(`Error creating multiple PostData entries: ${e}`);
+      // Consider how to handle partial success/failure if needed
+      throw new Error(
+        `Failed to save multiple PostData entries to sheet: ${e.message}`
+      );
     }
-  } else {
-    Logger.log("No valid posts data to write after validation.");
   }
 
-  // 作成された完全なデータの配列を返す
-  return createdPosts;
+  return results;
 }
 
 export {
@@ -1070,7 +938,6 @@ export {
   fetchPostedData,
   fetchErrorData,
   updateMultiplePostSchedules,
-  deleteMultiplePostData,
-  createMultiplePosts,
+  createMultiplePosts, // Keep export as function exists
   updateInReplyTo,
 };
