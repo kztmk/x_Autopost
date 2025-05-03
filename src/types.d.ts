@@ -82,7 +82,6 @@ export const SHEETS = {
   POSTS: "Posts",
   POSTED: "Posted",
   ERRORS: "Errors",
-  XAUTH: "XAuth",
   // Add other sheet names if needed
 } as const;
 
@@ -115,15 +114,6 @@ export const HEADERS = {
     // repostTargetId is not typically moved directly, postId indicates repost
   ] as const,
   ERROR_HEADERS: ["timestamp", "context", "message", "stack"] as const,
-  XAUTH_HEADERS: [
-    "accountId",
-    "userId", // Add userId
-    "apiKey",
-    "apiKeySecret",
-    "accessToken",
-    "accessTokenSecret",
-    "note",
-  ] as const,
 } as const;
 
 // Combine HEADERS and MAIN_HEADERS concept if MAIN_HEADERS only contained POSTED_HEADERS

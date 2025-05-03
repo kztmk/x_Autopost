@@ -644,5 +644,3 @@ async function repostTweet(
     throw error;
   }
 }
-
-// Removed declare const SHEETS... as it's imported
