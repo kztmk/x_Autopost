@@ -126,6 +126,7 @@ function createPostData(postDataInput) {
     inReplytoInternal: postDataInput.inReplytoInternal || "", // 未指定なら空文字列
     postId: postDataInput.postId || "", // 初期値は空文字列
     inReplyToOnX: postDataInput.inReplyToOnX || "", // 初期値は空文字列
+    quoteId: postDataInput.quoteId || "", // 初期値は空文字列
   };
 
   // --- シートへの書き込み ---
