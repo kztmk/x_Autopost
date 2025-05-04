@@ -457,13 +457,11 @@ async function processPost(
     }
 
     // ペイロードの準備
-    const payload: any = { text: postObject.contents };
-
-    // 引用ポストの設定
+    let content = postObject.contents;
     if (postObject.quoteId) {
-      // Twitter API v2では quote_tweet_id パラメータを使用
-      payload.quote_tweet_id = postObject.quoteId;
+      content = content + `\n${postObject.quoteId}`;
     }
+    const payload: any = { text: content };
 
     if (replyToTweetId) {
       payload.reply = { in_reply_to_tweet_id: replyToTweetId };
