@@ -457,15 +457,15 @@ async function processPost(
     }
 
     // ペイロードの準備
-    const payload: any = { text: postObject.contents };
+    let content = postObject.contents;
+    if (postObject.quoteId) {
+      content = +`\n${postObject.quoteId}`;
+    }
+    const payload: any = { text: content };
 
     if (replyToTweetId) {
       payload.reply = { in_reply_to_tweet_id: replyToTweetId };
       resultInReplyToId = replyToTweetId;
-    }
-
-    if (postObject.quoteId) {
-      payload.quote_tweet_id = postObject.quoteId;
     }
 
     // メディア処理
