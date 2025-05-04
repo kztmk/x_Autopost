@@ -19,6 +19,8 @@ export interface XPostData {
   inReplyToOnX?: string;
   quoteId?: string; // Added
   repostTargetId?: string; // Added
+  status?: string; // Added: 'queued', 'posted', 'failed', etc.
+  errorMessage?: string; // Added: error message if status is 'failed'
 }
 
 export interface XPostedData extends XPostData {
@@ -76,51 +78,9 @@ export interface XPostDataInput {
   inReplyToOnX?: string;
   quoteId?: string; // Added
   repostTargetId?: string; // Added
+  status?: string; // Added: initial status (typically 'queued')
+  errorMessage?: string; // Added: for when importing data with existing errors
 }
-
-export const SHEETS = {
-  POSTS: "Posts",
-  POSTED: "Posted",
-  ERRORS: "Errors",
-  // Add other sheet names if needed
-} as const;
-
-export const HEADERS = {
-  POST_HEADERS: [
-    "id", // 0
-    "createdAt", // 1
-    "postTo", // 2
-    "contents", // 3
-    "mediaUrls", // 4
-    "postSchedule", // 5
-    "inReplyToInternal", // 6
-    "postId", // 7 (Posted X ID or ERROR or Reposted:...)
-    "inReplyToOnX", // 8 (Posted X Reply ID)
-    "quoteId", // 9 (Posted X Quote ID)
-    "repostTargetId", // 10 (Repost Target X ID)
-  ] as const,
-  POSTED_HEADERS: [
-    "id",
-    "createdAt",
-    "postedAt", // Added
-    "postTo",
-    "contents",
-    "mediaUrls",
-    "postSchedule",
-    "inReplyToInternal",
-    "postId", // Posted X ID or Reposted:...
-    "inReplyToOnX", // Posted X Reply ID
-    "quoteId", // Posted X Quote ID
-    // repostTargetId is not typically moved directly, postId indicates repost
-  ] as const,
-  ERROR_HEADERS: ["timestamp", "context", "message", "stack"] as const,
-} as const;
-
-// Combine HEADERS and MAIN_HEADERS concept if MAIN_HEADERS only contained POSTED_HEADERS
-// Or define MAIN_HEADERS separately if it has a different structure/purpose
-export const MAIN_HEADERS = {
-  POSTED_HEADERS: HEADERS.POSTED_HEADERS, // Alias or re-export if needed elsewhere
-} as const;
 
 // Type for header map
 export type HeaderMap = { [key: string]: number };

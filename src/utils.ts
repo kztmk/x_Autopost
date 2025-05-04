@@ -2,8 +2,8 @@
 
 // const ERROR_SHEET_NAME = "Errors"; // Use SHEETS.ERRORS instead
 const GAS_X_AUTO_POST = "[X Auto Post:エラー報告]";
-
-import { SHEETS, HEADERS, PostError } from "./types"; // Import from types.d.ts and include HEADERS, PostError
+import { SHEETS, HEADERS } from "./constants"; // Import SHEETS from constants.ts
+import { PostError } from "./types"; // Import from types.d.ts and include HEADERS, PostError
 
 /**
  * Tests the sortPostsBySchedule function on the "Posts" sheet.
@@ -150,16 +150,18 @@ export function sortPostsBySchedule(
   // Write back the sorted data
   if (data.length > 0) {
     // --- Logging before setValues (Keep for verification) ---
-    data.forEach((row, index) =>
+    data.forEach((row, index) => {
       Logger.log(
         `  Row ${index + 2}: ${
           row[postScheduleIndex] instanceof Date
             ? row[postScheduleIndex].toISOString() // Log date as ISO string
             : row[postScheduleIndex] // Log non-date as is
         }`
-      )
-    );
+      );
+    }); // End of data.forEach loop
+
     // --- End of logging ---
+    // Corrected: Moved setValues outside the forEach loop
     dataRange.setValues(data);
   }
   Logger.log(`[sortPostsBySchedule] Sorted ${data.length} rows.`);
@@ -287,132 +289,6 @@ export function maskSensitive(value: string | null | undefined): string {
     return "***";
   }
   return value.substring(0, 3) + "*".repeat(value.length - 3);
-}
-
-/**
- * Generates a random nonce for OAuth requests.
- * @returns {string} A random string.
- */
-function generateNonce(): string {
-  return Utilities.base64Encode(
-    Math.random().toString(36).substring(2) + Date.now().toString(36)
-  ).replace(/[^a-zA-Z0-9]/g, ""); // Ensure alphanumeric
-}
-
-/**
- * Generates basic OAuth parameters.
- * @param {string} consumerKey The consumer key.
- * @returns {object} An object containing basic OAuth parameters.
- */
-export function generateOAuthParams(consumerKey: string): {
-  [key: string]: string;
-} {
-  return {
-    oauth_consumer_key: consumerKey,
-    oauth_nonce: generateNonce(),
-    oauth_signature_method: "HMAC-SHA1",
-    oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
-    oauth_version: "1.0",
-  };
-}
-
-/**
- * Generates the signing key for OAuth 1.0a.
- * @param {string} consumerSecret The consumer secret.
- * @param {string} tokenSecret The access token secret.
- * @returns {string} The signing key.
- */
-export function generateSigningKey(
-  consumerSecret: string,
-  tokenSecret: string
-): string {
-  return (
-    encodeURIComponent(consumerSecret) + "&" + encodeURIComponent(tokenSecret)
-  );
-}
-
-/**
- * Percent encodes a string according to RFC 3986.
- * @param {string} str The string to encode.
- * @returns {string} The encoded string.
- */
-function rfc3986Encode(str: string): string {
-  return encodeURIComponent(str)
-    .replace(/!/g, "%21")
-    .replace(/\*/g, "%2A")
-    .replace(/\(/g, "%28")
-    .replace(/\)/g, "%29")
-    .replace(/'/g, "%27");
-}
-
-/**
- * Normalizes request parameters for the OAuth signature base string.
- * @param {object} params The parameters to normalize.
- * @returns {string} The normalized parameter string.
- */
-function normalizeParams(params: { [key: string]: string }): string {
-  return Object.keys(params)
-    .sort()
-    .map((key) => `${rfc3986Encode(key)}=${rfc3986Encode(params[key])}`)
-    .join("&");
-}
-
-/**
- * Generates the signature base string for OAuth 1.0a.
- * @param {string} httpMethod The HTTP method (e.g., 'POST', 'GET').
- * @param {string} baseUrl The base URL of the request.
- * @param {object} oauthParams The OAuth parameters.
- * @param {object} requestParams Additional request parameters (query or body).
- * @returns {string} The signature base string.
- */
-export function generateSignatureBaseString(
-  httpMethod: string,
-  baseUrl: string,
-  oauthParams: { [key: string]: string },
-  requestParams: { [key: string]: string } = {}
-): string {
-  const allParams = { ...oauthParams, ...requestParams };
-  const normalized = normalizeParams(allParams);
-  return `${httpMethod.toUpperCase()}&${rfc3986Encode(baseUrl)}&${rfc3986Encode(
-    normalized
-  )}`;
-}
-
-/**
- * Generates the HMAC-SHA1 signature for OAuth 1.0a.
- * @param {string} baseString The signature base string.
- * @param {string} signingKey The signing key.
- * @returns {string} The Base64 encoded signature.
- */
-export function generateSignature(
-  baseString: string,
-  signingKey: string
-): string {
-  const signatureBytes = Utilities.computeHmacSignature(
-    Utilities.MacAlgorithm.HMAC_SHA_1,
-    baseString,
-    signingKey
-  );
-  return Utilities.base64Encode(signatureBytes);
-}
-
-/**
- * Generates the OAuth Authorization header string.
- * @param {object} oauthParams The OAuth parameters including the signature.
- * @returns {string} The Authorization header value.
- */
-export function generateOAuthHeader(oauthParams: {
-  [key: string]: string;
-}): string {
-  return (
-    "OAuth " +
-    Object.keys(oauthParams)
-      .sort()
-      .map(
-        (key) => `${rfc3986Encode(key)}="${rfc3986Encode(oauthParams[key])}"`
-      )
-      .join(", ")
-  );
 }
 
 // --- Trigger Management ---

@@ -8,9 +8,9 @@ import {
   DeleteResult,
   XPostDataInput,
   UpdateInReplyToResult,
-  HEADERS, // Import HEADERS
-  SHEETS, // Import SHEETS
 } from "../types";
+
+import { SHEETS, HEADERS } from "../constants"; // Import constants
 
 /**
  * 指定された名前のシートを取得し、ない場合は作成してヘッダーを挿入します。
@@ -50,7 +50,7 @@ export function getOrCreateSheetWithHeaders(
 }
 
 /**
- * 指定された投稿データを 'Posts' シートに新しい行として保存します。
+ * 指定された投稿データを POST_QUEUE シートに新しい行として保存します。
  * シートが存在しない場合は作成し、ヘッダー行を挿入します。
  * 保存時にユニークなIDと作成日時を付与します。
  *
@@ -69,7 +69,7 @@ function createPostData(postDataInput: XPostDataInput): XPostData {
   const newId = Utilities.getUuid();
   const createdAt = new Date();
 
-  // Align with HEADERS.POST_HEADERS from types.d.ts
+  // Align with HEADERS.POST_HEADERS from constants.ts
   const newPostData: XPostData = {
     id: newId,
     createdAt: createdAt.toISOString(),
@@ -82,6 +82,8 @@ function createPostData(postDataInput: XPostDataInput): XPostData {
     inReplyToOnX: postDataInput.inReplyToOnX || "",
     quoteId: postDataInput.quoteId || "", // Add quoteId
     repostTargetId: postDataInput.repostTargetId || "", // Add repostTargetId
+    status: postDataInput.status || "queued", // Default to 'queued' if not specified
+    errorMessage: postDataInput.errorMessage || "",
   };
 
   try {
@@ -102,7 +104,7 @@ function createPostData(postDataInput: XPostDataInput): XPostData {
 }
 
 /**
- * 'Posts' シートに保存されている全てのX投稿データを取得します。
+ * POST_QUEUE シートに保存されている全てのX投稿データを取得します。
  * @return {XPostData[]} 保存されているXPostDataオブジェクトの配列。
  * @throws {Error} シートが見つからない場合。
  */
@@ -485,20 +487,20 @@ function fetchErrorData() {
         let value = j < row.length ? row[j] : ""; // 行に対応するデータがあれば取得、なければ空文字
 
         // Timestamp列がDateオブジェクトの場合、ISO文字列に変換
-        if (header === "Timestamp" && value instanceof Date) {
+        if (header === "timestamp" && value instanceof Date) {
           value = value.toISOString();
         }
-        errorData[header] = value;
+        errorData[header as keyof PostError] = value as string;
       }
     }
     // エラーデータの場合、通常は空行を除外する必要はないが、
     // Timestampが空でない行のみ含めるなどのフィルタリングは可能
-    if (errorData["Timestamp"]) {
+    if (errorData["timestamp"]) {
       // Timestampが存在する行のみを追加
       errorDataList.push(errorData);
     } else {
       Logger.log(
-        `Skipping row ${i + 1} in ${SHEETS.ERRORS} due to missing Timestamp.`
+        `Skipping row ${i + 1} in ${SHEETS.ERRORS} due to missing timestamp.`
       );
     }
   }
@@ -636,7 +638,9 @@ function updateMultiplePostSchedules(
  * @param {Array<{id: string, inReplyToInternal: string}>} updateRequests - 更新するID と inReplyToInternal のペアの配列
  * @return {Array<{id: string, status: string, message?: string}>} 各更新リクエストの結果
  */
-function updateInReplyTo(updateRequests) {
+function updateInReplyTo(
+  updateRequests: Array<{ id: string; inReplyToInternal: string }>
+): UpdateInReplyToResult[] {
   // 共通関数を使用してシート取得または作成
   const sheet = getOrCreateSheetWithHeaders(SHEETS.POSTS, HEADERS.POST_HEADERS);
 
@@ -657,7 +661,7 @@ function updateInReplyTo(updateRequests) {
 
   const headers = values[0].map((header) => String(header).trim());
   const idColumnIndex = headers.indexOf("id");
-  const inReplyToInternalColumnIndex = headers.indexOf("inReplytoInternal");
+  const inReplyToInternalColumnIndex = headers.indexOf("inReplyToInternal");
 
   // 必要な列が存在するか確認
   if (idColumnIndex === -1) {
@@ -665,7 +669,7 @@ function updateInReplyTo(updateRequests) {
   }
   if (inReplyToInternalColumnIndex === -1) {
     throw new Error(
-      'Cannot find "inReplytoInternal" column in the sheet header.'
+      'Cannot find "inReplyToInternal" column in the sheet header.'
     );
   }
 
@@ -897,6 +901,8 @@ function createMultiplePosts(postsInput: XPostDataInput[]): XPostData[] {
       inReplyToOnX: postInput.inReplyToOnX || "",
       quoteId: postInput.quoteId || "",
       repostTargetId: postInput.repostTargetId || "",
+      status: postInput.status || "queued", // Default to 'queued'
+      errorMessage: postInput.errorMessage || "", // Include error message if present
     };
 
     const rowData = HEADERS.POST_HEADERS.map(
@@ -930,6 +936,7 @@ function createMultiplePosts(postsInput: XPostDataInput[]): XPostData[] {
   return results;
 }
 
+// Export functions that should be accessible from other modules
 export {
   createPostData,
   fetchPostData,
@@ -938,6 +945,7 @@ export {
   fetchPostedData,
   fetchErrorData,
   updateMultiplePostSchedules,
-  createMultiplePosts, // Keep export as function exists
+  createMultiplePosts,
   updateInReplyTo,
+  deleteMultiplePostData,
 };
