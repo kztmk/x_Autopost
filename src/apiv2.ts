@@ -46,7 +46,7 @@ interface ArchiveRequestData {
  * @param {object} e - Apps Scriptのイベントオブジェクト。
  * @return {ContentService.TextOutput} JSON形式のレスポンス。
  */
-function doPost(e) {
+export function doPost(e) {
   let action = e.parameter.action;
   let target = e.parameter.target;
   let response = {};
@@ -333,7 +333,7 @@ function doPost(e) {
  * @param {object} e - Apps Scriptのイベントオブジェクト。
  * @return {ContentService.TextOutput} JSON形式のレスポンス。
  */
-function doGet(e) {
+export function doGet(e) {
   let action = e.parameter.action;
   let target = e.parameter.target;
   let response = {};

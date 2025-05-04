@@ -6,6 +6,8 @@ import { HEADERS, SHEETS } from "./constants";
 import { HeaderMap, XAuthInfo } from "./types";
 import { logErrorToSheet } from "./utils";
 
+import * as apiv2 from "./apiv2";
+
 // --- PropertiesService と定数 ---
 const scriptProperties = PropertiesService.getScriptProperties();
 const TRIGGER_INTERVAL_PREFIX = "triggerInterval_";
