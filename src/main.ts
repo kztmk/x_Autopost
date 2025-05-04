@@ -438,16 +438,21 @@ async function processPost(
 
     // リプライ先の処理
     let replyToTweetId: string | null = null;
-    if (postObject.inReplyToInternal) {
-      replyToTweetId = await getReplyToPostId(
-        postObject.inReplyToInternal,
-        postsSheet,
-        postedSheet
-      );
-      if (!replyToTweetId) {
-        throw new Error(
-          `Could not find original tweet ID for internal reply ID: ${postObject.inReplyToInternal}`
+    // 直接リプライ先が設定されている場合には、検索しない
+    if (postObject.inReplyToOnX) {
+      replyToTweetId = postObject.inReplyToOnX;
+    } else {
+      if (postObject.inReplyToInternal) {
+        replyToTweetId = await getReplyToPostId(
+          postObject.inReplyToInternal,
+          postsSheet,
+          postedSheet
         );
+        if (!replyToTweetId) {
+          throw new Error(
+            `Could not find original tweet ID for internal reply ID: ${postObject.inReplyToInternal}`
+          );
+        }
       }
     }
 
