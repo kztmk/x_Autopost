@@ -60,6 +60,112 @@ function getTriggerIntervalMinutes(functionName: string): number {
   return DEFAULT_TRIGGER_INTERVAL;
 }
 
+/**
+ * Finds the next eligible post to be processed based on schedule and status.
+ * @param postsData The full data from the Posts sheet.
+ * @param postsHeaderMap A map of header names to column indices for the Posts sheet.
+ * @param intervalEnd The end time of the current processing interval.
+ * @param cache The script cache service instance.
+ * @returns The post object to process (including row data, index, and cache key) or null if no eligible post is found.
+ */
+function findNextScheduledPost(
+  postsData: any[][],
+  postsHeaderMap: HeaderMap,
+  intervalEnd: Date,
+  cache: GoogleAppsScript.Cache.Cache
+): { rowData: any[]; rowIndex: number; cacheKey: string } | null {
+  const scheduleIndex = postsHeaderMap["postSchedule"];
+  const statusIndex = postsHeaderMap["status"];
+  const postIdIndex = postsHeaderMap["postId"];
+  const idIndex = postsHeaderMap["id"];
+
+  if (
+    scheduleIndex === undefined ||
+    postIdIndex === undefined ||
+    idIndex === undefined
+  ) {
+    // This case should ideally be caught earlier, but added for safety
+    Logger.log(
+      "Error in findNextScheduledPost: Required columns missing in header map."
+    );
+    return null;
+  }
+
+  let postsToProcess: { rowData: any[]; rowIndex: number; cacheKey: string }[] =
+    [];
+
+  // Process rows from index 1 (skip header)
+  for (let i = 1; i < postsData.length; i++) {
+    const row = postsData[i];
+    const postId = row[postIdIndex];
+    const status = statusIndex !== undefined ? row[statusIndex] : null;
+    const scheduleValue = row[scheduleIndex];
+    const internalId = row[idIndex]?.toString();
+
+    // Skip if already processed, has postId, status is failed, or missing internal ID
+    if (postId || status === "failed" || !internalId) {
+      continue;
+    }
+
+    // Check cache to prevent concurrent processing
+    const cacheKey = `post_${internalId}`;
+    if (cache.get(cacheKey)) {
+      Logger.log(
+        `Skipping post ID ${internalId} (row ${
+          i + 1
+        }) as it's already being processed (cache hit).`
+      );
+      continue;
+    }
+
+    // Parse schedule date
+    let scheduleDate: Date | null = null;
+    if (scheduleValue instanceof Date && !isNaN(scheduleValue.getTime())) {
+      scheduleDate = scheduleValue;
+    } else if (
+      typeof scheduleValue === "string" &&
+      scheduleValue.trim() !== ""
+    ) {
+      const parsedDate = new Date(scheduleValue);
+      if (!isNaN(parsedDate.getTime())) {
+        scheduleDate = parsedDate;
+      }
+    }
+
+    // Check if post is scheduled within the current interval
+    if (scheduleDate && scheduleDate <= intervalEnd) {
+      postsToProcess.push({
+        rowData: row,
+        rowIndex: i + 1, // 1-based row index
+        cacheKey,
+      });
+    }
+  }
+
+  // Sort posts by schedule (earlier first)
+  postsToProcess.sort((a, b) => {
+    const dateA = a.rowData[scheduleIndex];
+    const dateB = b.rowData[scheduleIndex];
+    // Ensure both are valid dates before comparing times
+    if (
+      dateA instanceof Date &&
+      !isNaN(dateA.getTime()) &&
+      dateB instanceof Date &&
+      !isNaN(dateB.getTime())
+    ) {
+      return dateA.getTime() - dateB.getTime();
+    } else if (dateA instanceof Date && !isNaN(dateA.getTime())) {
+      return -1; // Valid date A comes before invalid/missing date B
+    } else if (dateB instanceof Date && !isNaN(dateB.getTime())) {
+      return 1; // Valid date B comes before invalid/missing date A
+    }
+    return 0; // Keep order if both are invalid/missing
+  });
+
+  // Return the first eligible post
+  return postsToProcess.length > 0 ? postsToProcess[0] : null;
+}
+
 // --- Main Function ---
 async function autoPostToX() {
   try {
@@ -107,91 +213,21 @@ async function autoPostToX() {
       now.getTime() + triggerIntervalMinutes * 60 * 1000
     );
 
-    // Find posts to process within the current interval
-    const scheduleIndex = postsHeaderMap["postSchedule"];
-    const statusIndex = postsHeaderMap["status"];
-    const postIdIndex = postsHeaderMap["postId"];
-    const idIndex = postsHeaderMap["id"];
-
-    if (
-      scheduleIndex === undefined ||
-      postIdIndex === undefined ||
-      idIndex === undefined
-    ) {
-      throw new Error("Required columns not found in Posts sheet.");
-    }
-
     // Cache to prevent processing the same post ID multiple times concurrently
     const cache = CacheService.getScriptCache();
     let processedInThisRun = false; // Flag to ensure only one post per run
 
-    // Find eligible posts scheduled for the current interval
-    let postsToProcess: any[] = [];
+    // Find the next post to process using the new function
+    const postToProcess = findNextScheduledPost(
+      postsData,
+      postsHeaderMap,
+      intervalEnd,
+      cache
+    );
 
-    // Process rows from index 1 (skip header)
-    for (let i = 1; i < postsData.length; i++) {
-      const row = postsData[i];
-      const postId = row[postIdIndex];
-      const status = statusIndex !== undefined ? row[statusIndex] : null;
-      const scheduleValue = row[scheduleIndex];
-      const internalId = row[idIndex]?.toString();
-
-      // Skip if already processed, has postId, status is failed, or missing internal ID
-      if (postId || status === "failed" || !internalId) {
-        continue;
-      }
-
-      // Check cache to prevent concurrent processing
-      const cacheKey = `post_${internalId}`;
-      if (cache.get(cacheKey)) {
-        Logger.log(
-          `Skipping post ID ${internalId} (row ${
-            i + 1
-          }) as it's already being processed.`
-        );
-        continue;
-      }
-
-      // Parse schedule date
-      let scheduleDate: Date | null = null;
-      if (scheduleValue instanceof Date && !isNaN(scheduleValue.getTime())) {
-        scheduleDate = scheduleValue;
-      } else if (
-        typeof scheduleValue === "string" &&
-        scheduleValue.trim() !== ""
-      ) {
-        const parsedDate = new Date(scheduleValue);
-        if (!isNaN(parsedDate.getTime())) {
-          scheduleDate = parsedDate;
-        }
-      }
-
-      // Check if post is scheduled within the current interval
-      if (scheduleDate && scheduleDate <= intervalEnd) {
-        postsToProcess.push({
-          rowData: row,
-          rowIndex: i + 1, // 1-based row index
-          cacheKey,
-        });
-      }
-    }
-
-    // Sort posts by schedule (earlier first)
-    postsToProcess.sort((a, b) => {
-      const dateA = a.rowData[scheduleIndex];
-      const dateB = b.rowData[scheduleIndex];
-      if (dateA instanceof Date && dateB instanceof Date) {
-        return dateA.getTime() - dateB.getTime();
-      }
-      return 0;
-    });
-
-    // Process only the first eligible post
-    if (postsToProcess.length > 0) {
-      const postToProcess = postsToProcess[0];
-      const rowData = postToProcess.rowData;
-      const rowIndex = postToProcess.rowIndex;
-      const cacheKey = postToProcess.cacheKey;
+    // Process the found post
+    if (postToProcess) {
+      const { rowData, rowIndex, cacheKey } = postToProcess;
 
       // Add to cache to prevent concurrent processing
       cache.put(cacheKey, "processing", 60); // Cache for 60 seconds
@@ -213,19 +249,24 @@ async function autoPostToX() {
         processedInThisRun = true;
       } catch (e: any) {
         // Log error and continue
-        Logger.log(`Error processing post: ${e.message}`);
+        Logger.log(
+          `Error processing post (ID: ${
+            rowData[postsHeaderMap["id"]] || "N/A"
+          }, Row: ${rowIndex}): ${e.message}`
+        );
         logErrorToSheet(
           {
             message: e.message,
             stack: e.stack || "",
-            context: "autoPostToX",
+            context: `autoPostToX - Processing Row ${rowIndex}`,
             timestamp: new Date().toISOString(),
           },
-          "autoPostToX"
+          "Post Processing Error"
         );
 
         // Update status to failed
         try {
+          const statusIndex = postsHeaderMap["status"];
           if (statusIndex !== undefined) {
             postsSheet.getRange(rowIndex, statusIndex + 1).setValue("failed");
             // Update error message column if it exists
@@ -233,11 +274,23 @@ async function autoPostToX() {
             if (errorMsgIndex !== undefined) {
               postsSheet
                 .getRange(rowIndex, errorMsgIndex + 1)
-                .setValue(e.message);
+                .setValue(e.message.substring(0, 500)); // Limit error message length
             }
           }
         } catch (updateError: any) {
-          Logger.log(`Error updating status to failed: ${updateError.message}`);
+          Logger.log(
+            `Error updating status to failed for row ${rowIndex}: ${updateError.message}`
+          );
+          // Log this secondary error as well
+          logErrorToSheet(
+            {
+              message: `Failed to update status/error message for row ${rowIndex} after initial error: ${updateError.message}`,
+              stack: updateError.stack || "",
+              context: "autoPostToX - Status Update Error",
+              timestamp: new Date().toISOString(),
+            },
+            "Status Update Error"
+          );
         }
       } finally {
         // Remove from cache regardless of success/failure
@@ -246,11 +299,14 @@ async function autoPostToX() {
     } else if (!processedInThisRun) {
       Logger.log("No posts scheduled for the current interval.");
 
-      // Check if there are any pending posts left
+      // Check if there are any pending posts left (excluding failed ones)
       let pendingPostsExist = false;
+      const postIdIndex = postsHeaderMap["postId"];
+      const statusIndex = postsHeaderMap["status"];
       for (let i = 1; i < postsData.length; i++) {
         const row = postsData[i];
         const status = statusIndex !== undefined ? row[statusIndex] : null;
+        // Check if postId is empty AND status is not 'failed'
         if (!row[postIdIndex] && status !== "failed") {
           pendingPostsExist = true;
           break;
