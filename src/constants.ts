@@ -1,3 +1,5 @@
+export const VERSION = "1.0.31";
+
 export const SHEETS = {
   POSTS: "Posts",
   POST_QUEUE: "Posts", // Alias for POSTS
@@ -56,7 +58,13 @@ export const HEADERS = {
     // repostTargetId is not typically moved directly, postId indicates repost
   ] as const,
 
-  ERROR_HEADERS: ["timestamp", "context", "message", "stack"] as const,
+  ERROR_HEADERS: [
+    "timestamp",
+    "context",
+    "message",
+    "stack",
+    "postContent",
+  ] as const,
 
   // Alias for ERROR_HEADERS
   ERROR_LOG_HEADERS: ["timestamp", "context", "message", "stack"] as const,

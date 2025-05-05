@@ -36,6 +36,7 @@ export interface PostError {
   context: string;
   message: string;
   stack: string;
+  postContent: string;
 }
 
 export interface PostScheduleUpdate {

@@ -228,13 +228,14 @@ async function autoPostToX() {
     // Process the found post
     if (postToProcess) {
       const { rowData, rowIndex, cacheKey } = postToProcess;
+      let postObject: any = null; // Declare postObject outside the try block
 
       // Add to cache to prevent concurrent processing
       cache.put(cacheKey, "processing", 60); // Cache for 60 seconds
 
       try {
-        // Map row to object
-        const postObject = mapRowToObject(rowData, postsHeaderMap);
+        // Map row to object - moved outside try block by user, ensure it's here or before
+        postObject = mapRowToObject(rowData, postsHeaderMap);
 
         // Process the post
         await processPost(
@@ -249,10 +250,11 @@ async function autoPostToX() {
         processedInThisRun = true;
       } catch (e: any) {
         // Log error and continue
+        const internalPostId = rowData[postsHeaderMap["id"]] || "N/A"; // Use internal ID if needed
+        // Safely access content from postObject, default to 'Content not available'
+        const postContent = postObject?.contents ?? "Content not available";
         Logger.log(
-          `Error processing post (ID: ${
-            rowData[postsHeaderMap["id"]] || "N/A"
-          }, Row: ${rowIndex}): ${e.message}`
+          `Error processing post (Internal ID: ${internalPostId}, Row: ${rowIndex}): ${e.message}`
         );
         logErrorToSheet(
           {
@@ -260,6 +262,8 @@ async function autoPostToX() {
             stack: e.stack || "",
             context: `autoPostToX - Processing Row ${rowIndex}`,
             timestamp: new Date().toISOString(),
+            // postId: postId, // Removed API postId as requested
+            postContent: postContent.substring(0, 20), // Keep post content
           },
           "Post Processing Error"
         );
@@ -281,13 +285,15 @@ async function autoPostToX() {
           Logger.log(
             `Error updating status to failed for row ${rowIndex}: ${updateError.message}`
           );
-          // Log this secondary error as well
+          // Log this secondary error as well, including content but not API postId
           logErrorToSheet(
             {
               message: `Failed to update status/error message for row ${rowIndex} after initial error: ${updateError.message}`,
               stack: updateError.stack || "",
               context: "autoPostToX - Status Update Error",
               timestamp: new Date().toISOString(),
+              // postId: postId, // Removed API postId here too
+              postContent: postContent.substring(0, 20), // Keep post content here too
             },
             "Status Update Error"
           );
@@ -325,12 +331,14 @@ async function autoPostToX() {
     Logger.log(
       `Critical error in autoPostToX: ${e.message}\nStack: ${e.stack}`
     );
+    // Critical errors likely won't have postContent available
     logErrorToSheet(
       {
         message: e.message,
         stack: e.stack || "",
         context: "autoPostToX",
         timestamp: new Date().toISOString(),
+        postContent: "N/A", // Add placeholder for consistency
       },
       "Critical error"
     );
