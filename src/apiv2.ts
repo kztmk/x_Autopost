@@ -30,7 +30,6 @@ import {
   PostScheduleUpdate,
   XPostDataInput,
 } from "./types";
-import { VERSION } from "./constants";
 
 interface RequestData {
   [key: string]: any; // 任意のキーと値のペアを許可
@@ -431,7 +430,6 @@ export function doGet(e) {
             response = {
               functionName: functionName,
               isTriggerConfigured: exists,
-              version: VERSION,
             };
             break;
           default:

@@ -1,3 +1,5 @@
+import { VERSION } from "../constants";
+
 // --- PropertiesService を利用するための準備 ---
 const scriptProperties = PropertiesService.getScriptProperties();
 const TRIGGER_INTERVAL_PREFIX = "triggerInterval_"; // プロパティのキー接頭辞
@@ -242,6 +244,7 @@ function checkTriggerExists(functionName) {
         triggerFound: triggerFound,
         triggerId: foundTriggerId, // 見つかったトリガーのID
         intervalMinutes: intervalMinutes,
+        version: VERSION,
       }, // 時間ベースでプロパティが見つかった場合のみ数値、それ以外は null
       message: triggerFound
         ? `Trigger for function '${functionName}' found.`
