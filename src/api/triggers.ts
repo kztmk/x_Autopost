@@ -1,4 +1,5 @@
 import { VERSION } from "../constants";
+import { deleteTriggerByHandler, deleteAllTriggers } from "../utils";
 
 // --- PropertiesService を利用するための準備 ---
 const scriptProperties = PropertiesService.getScriptProperties();
@@ -28,26 +29,7 @@ function createTimeBasedTrigger(postData) {
     Logger.log(`Interval minutes received: ${intervalMinutes}`);
 
     // 既存の 'autoPostToX' ハンドラ関数を持つトリガーを削除し、関連プロパティも削除
-    const triggers = ScriptApp.getProjectTriggers();
-    for (const trigger of triggers) {
-      if (trigger.getHandlerFunction() === handlerFunction) {
-        const existingTriggerId = trigger.getUniqueId();
-        deletedTriggerIds.push(existingTriggerId); // 削除対象IDを記録
-        ScriptApp.deleteTrigger(trigger);
-        deletedExistingCount++;
-        Logger.log(`Deleted existing trigger: ${existingTriggerId}`);
-
-        // 対応するプロパティも削除
-        const propertyKey = TRIGGER_INTERVAL_PREFIX + existingTriggerId;
-        if (scriptProperties.getProperty(propertyKey)) {
-          scriptProperties.deleteProperty(propertyKey);
-          Logger.log(`Deleted script property: ${propertyKey}`);
-        }
-      }
-    }
-    Logger.log(
-      `Deleted ${deletedExistingCount} existing trigger(s) for handler '${handlerFunction}'.`
-    );
+    deleteTriggerByHandler(handlerFunction);
 
     // 新しいトリガーを作成
     const newTrigger = ScriptApp.newTrigger(handlerFunction)
@@ -92,79 +74,25 @@ function createTimeBasedTrigger(postData) {
 }
 
 /**
- * プロジェクトの全てのトリガーを削除し、関連するプロパティも削除する
+ * Deletes all triggers and their associated properties.
  * @returns {GoogleAppsScript.Content.TextOutput} JSONレスポンス
  */
-function deleteAllTriggers() {
-  let deletedCount = 0;
-  const deletedTriggerDetails: { id: string; handler: string }[] = [];
-  const deletedPropertyKeys: string[] = [];
-
+function deleteAllTriggersWrapper() {
   try {
-    const triggers = ScriptApp.getProjectTriggers();
-    const totalTriggers = triggers.length; // 削除対象の総数
-
-    if (totalTriggers === 0) {
-      Logger.log("No project triggers found to delete.");
-    } else {
-      Logger.log(`Found ${totalTriggers} trigger(s) to delete.`);
-      for (const trigger of triggers) {
-        const triggerId = trigger.getUniqueId();
-        const handler = trigger.getHandlerFunction();
-        deletedTriggerDetails.push({ id: triggerId, handler: handler }); // 削除前に情報を記録
-
-        // トリガーを削除
-        ScriptApp.deleteTrigger(trigger);
-        deletedCount++;
-
-        // 対応するプロパティも削除
-        const propertyKey = TRIGGER_INTERVAL_PREFIX + triggerId;
-        if (scriptProperties.getProperty(propertyKey)) {
-          scriptProperties.deleteProperty(propertyKey);
-          deletedPropertyKeys.push(propertyKey);
-          Logger.log(`Deleted script property: ${propertyKey}`);
-        }
-        // Logger.log(`Deleted trigger: ${triggerId} (Handler: ${handler})`); // 個別ログ
-      }
-      Logger.log(`Successfully deleted ${deletedCount} project trigger(s).`);
-      if (deletedPropertyKeys.length > 0) {
-        Logger.log(
-          `Deleted ${deletedPropertyKeys.length} related script properties.`
-        );
-      }
-    }
-
-    // 成功レスポンス
+    const deletedCount = deleteAllTriggers();
+    Logger.log(`Successfully deleted ${deletedCount} triggers.`);
     return {
       status: "success",
-      message: `Successfully deleted ${deletedCount} project trigger(s).`,
-      data: {
-        functionName: "",
-        triggerId: "", // トリガーIDは不要
-        triggerFound: false, // トリガーは削除済み
-        intervalMinutes: -1, // 時間ベースのトリガーは削除済み
-      },
+      message: `Successfully deleted ${deletedCount} triggers.`,
     };
   } catch (error: any) {
     Logger.log(`Error deleting all triggers: ${error}`);
-    // エラーレスポンス
     return {
       status: "error",
       message: `Failed to delete all triggers: ${error.message}`,
-      // エラー発生までに削除できたトリガーやプロパティに関する情報は部分的な可能性あり
-      partiallyDeletedCount: deletedCount,
-      partiallyDeletedTriggers: deletedTriggerDetails,
-      partiallyDeletedPropertyKeys: deletedPropertyKeys,
-      error: error.toString(),
     };
   }
 }
-
-// --- checkTriggerExists 関数について ---
-// この関数は現在のところ PropertiesService を参照していません。
-// もしこの関数でもプロパティから間隔を取得したい場合は、以下のように修正できます。
-// ただし、`getMinutes()` メソッドは存在しないため、コメントアウトまたは削除し、
-// PropertiesService から取得するようにします。
 
 /**
  * 指定された関数名に紐づくプロジェクトトリガーが存在するかどうか、
@@ -262,46 +190,9 @@ function checkTriggerExists(functionName) {
   }
 }
 
-/**
- * Deletes the trigger associated with the specified handler function and its property.
- * @param {string} handlerName The name of the handler function (e.g., 'autoPostToX').
- * @returns {boolean} True if a trigger was found and deleted, false otherwise.
- */
-function deleteTriggerByHandler(handlerName: string): boolean {
-  let deleted = false;
-  try {
-    const triggers = ScriptApp.getProjectTriggers();
-    for (const trigger of triggers) {
-      if (trigger.getHandlerFunction() === handlerName) {
-        const triggerId = trigger.getUniqueId();
-        Logger.log(
-          `Found trigger for handler '${handlerName}' (ID: ${triggerId}). Deleting...`
-        );
-        ScriptApp.deleteTrigger(trigger);
-
-        // Delete associated property
-        const propertyKey = TRIGGER_INTERVAL_PREFIX + triggerId;
-        if (scriptProperties.getProperty(propertyKey)) {
-          scriptProperties.deleteProperty(propertyKey);
-          Logger.log(`Deleted associated script property: ${propertyKey}`);
-        }
-        deleted = true;
-        break; // Assume only one trigger per handler
-      }
-    }
-    if (!deleted) {
-      Logger.log(`No trigger found for handler '${handlerName}'.`);
-    }
-  } catch (error: any) {
-    Logger.log(`Error deleting trigger for handler '${handlerName}': ${error}`);
-    // Depending on requirements, you might want to re-throw or handle differently
-  }
-  return deleted;
-}
-
 export {
   createTimeBasedTrigger,
-  deleteAllTriggers,
+  deleteAllTriggersWrapper as deleteAllTriggers,
   checkTriggerExists,
   deleteTriggerByHandler, // Export the new function
 };

@@ -5,6 +5,10 @@ const GAS_X_AUTO_POST = "[X Auto Post:エラー報告]";
 import { SHEETS, HEADERS } from "./constants"; // Import SHEETS from constants.ts
 import { PostError } from "./types"; // Import from types.d.ts and include HEADERS, PostError
 
+// Ensure constants are defined
+const scriptProperties = PropertiesService.getScriptProperties();
+const TRIGGER_INTERVAL_PREFIX = "triggerInterval_";
+
 /**
  * Tests the sortPostsBySchedule function on the "Posts" sheet.
  */
@@ -294,39 +298,68 @@ export function maskSensitive(value: string | null | undefined): string {
 // --- Trigger Management ---
 
 /**
- * Deletes all project triggers associated with a specific handler function.
- * @param {string} functionName The name of the handler function whose triggers should be deleted.
+ * Deletes the trigger associated with the specified handler function and its property.
+ * @param {string} handlerName The name of the handler function (e.g., 'autoPostToX').
+ * @returns {boolean} True if a trigger was found and deleted, false otherwise.
  */
-export function deleteTriggerByHandler(functionName: string): void {
+function deleteTriggerByHandler(handlerName: string): boolean {
+  let deleted = false;
   try {
     const triggers = ScriptApp.getProjectTriggers();
-    let deletedCount = 0;
     for (const trigger of triggers) {
-      if (trigger.getHandlerFunction() === functionName) {
+      if (trigger.getHandlerFunction() === handlerName) {
         const triggerId = trigger.getUniqueId();
-        try {
-          ScriptApp.deleteTrigger(trigger);
-          Logger.log(
-            `Deleted trigger with ID: ${triggerId} for handler: ${functionName}`
-          );
-          deletedCount++;
-        } catch (deleteError: any) {
-          Logger.log(
-            `Failed to delete trigger ${triggerId} for handler ${functionName}: ${deleteError}`
-          );
-          // Optionally log to error sheet
-          // logErrorToSheet(deleteError, `Failed to delete trigger ${triggerId}`);
+        Logger.log(
+          `Found trigger for handler '${handlerName}' (ID: ${triggerId}). Deleting...`
+        );
+        ScriptApp.deleteTrigger(trigger);
+
+        // Delete associated property
+        const propertyKey = TRIGGER_INTERVAL_PREFIX + triggerId;
+        if (scriptProperties.getProperty(propertyKey)) {
+          scriptProperties.deleteProperty(propertyKey);
+          Logger.log(`Deleted associated script property: ${propertyKey}`);
         }
+        deleted = true;
+        break; // Assume only one trigger per handler
       }
     }
-    if (deletedCount === 0) {
-      Logger.log(`No triggers found for handler function: ${functionName}`);
+    if (!deleted) {
+      Logger.log(`No trigger found for handler '${handlerName}'.`);
     }
-  } catch (e: any) {
-    Logger.log(
-      `Error accessing or deleting triggers for handler ${functionName}: ${e}`
-    );
-    // Optionally log to error sheet
-    // logErrorToSheet(e, `Error in deleteTriggerByHandler for ${functionName}`);
+  } catch (error: any) {
+    Logger.log(`Error deleting trigger for handler '${handlerName}': ${error}`);
   }
+  return deleted;
 }
+
+/**
+ * Deletes all triggers and their associated properties.
+ * @returns {number} The number of triggers deleted.
+ */
+function deleteAllTriggers(): number {
+  let deletedCount = 0;
+  try {
+    const triggers = ScriptApp.getProjectTriggers();
+    for (const trigger of triggers) {
+      const triggerId = trigger.getUniqueId();
+      const handler = trigger.getHandlerFunction();
+      Logger.log(`Deleting trigger: ${triggerId} (Handler: ${handler})`);
+      ScriptApp.deleteTrigger(trigger);
+
+      // Delete associated property
+      const propertyKey = TRIGGER_INTERVAL_PREFIX + triggerId;
+      if (scriptProperties.getProperty(propertyKey)) {
+        scriptProperties.deleteProperty(propertyKey);
+        Logger.log(`Deleted associated script property: ${propertyKey}`);
+      }
+      deletedCount++;
+    }
+    Logger.log(`Successfully deleted ${deletedCount} trigger(s).`);
+  } catch (error: any) {
+    Logger.log(`Error deleting all triggers: ${error}`);
+  }
+  return deletedCount;
+}
+
+export { deleteTriggerByHandler, deleteAllTriggers };

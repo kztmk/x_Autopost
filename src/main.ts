@@ -4,7 +4,7 @@ import { uploadMediaToX } from "./media";
 import * as twitterApi from "./api/twitter"; // 追加: Twitter API関連のインポート
 import { HEADERS, SHEETS } from "./constants";
 import { HeaderMap, XAuthInfo } from "./types";
-import { logErrorToSheet } from "./utils";
+import { logErrorToSheet, deleteTriggerByHandler } from "./utils";
 
 import * as apiv2 from "./apiv2";
 
@@ -188,8 +188,9 @@ async function autoPostToX() {
       .getValues()[0];
     const postsData = postsSheet.getDataRange().getValues();
 
-    if (postsData.length <= 1) {
+    if (postsData.length < 1) {
       Logger.log("No data found in Posts sheet.");
+      deleteTriggerByHandler("autoPostToX");
       return; // No data to process
     }
 
