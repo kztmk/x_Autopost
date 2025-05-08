@@ -477,6 +477,7 @@ function fetchErrorData() {
       context: "",
       message: "",
       stack: "",
+      postContent: "",
     };
 
     // ヘッダーに基づいてオブジェクトを構築
