@@ -23,6 +23,13 @@ import {
 } from "./api/triggers";
 import { archiveSheet } from "./api/archive";
 import {
+  assertProxyAuthorized,
+  generateSetupCode,
+  getSecurityStatus,
+  initializeProxyAuth,
+  stripAuthField,
+} from "./security";
+import {
   XAuthInfo,
   XPostData,
   PostError,
@@ -39,6 +46,133 @@ interface ArchiveRequestData {
   filename: string;
 }
 
+const LOG_SHEET_NAME = "log";
+
+function appendInitializeLog(
+  phase: string,
+  details: { [key: string]: any } = {}
+): void {
+  try {
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    if (!spreadsheet) {
+      Logger.log(`initialize log skipped: active spreadsheet not found.`);
+      return;
+    }
+
+    let sheet = spreadsheet.getSheetByName(LOG_SHEET_NAME);
+    if (!sheet) {
+      sheet = spreadsheet.insertSheet(LOG_SHEET_NAME);
+      sheet.appendRow([
+        "timestamp",
+        "phase",
+        "action",
+        "target",
+        "uid",
+        "hasSetupCode",
+        "setupCodeLength",
+        "message",
+        "details",
+      ]);
+    }
+
+    sheet.appendRow([
+      new Date(),
+      phase,
+      details.action || "",
+      details.target || "",
+      details.uid ? maskLogValue(String(details.uid)) : "",
+      details.hasSetupCode === undefined ? "" : Boolean(details.hasSetupCode),
+      details.setupCodeLength || "",
+      details.message || "",
+      safeStringify(details),
+    ]);
+  } catch (logError: any) {
+    Logger.log(`initialize log failed: ${logError.message}`);
+  }
+}
+
+function maskLogValue(value: string): string {
+  if (value.length <= 8) {
+    return "****";
+  }
+
+  return `${value.substring(0, 4)}***${value.substring(value.length - 4)}`;
+}
+
+function safeStringify(value: any): string {
+  try {
+    const text = JSON.stringify(value);
+    return text.length > 1000 ? `${text.substring(0, 1000)}...` : text;
+  } catch (error) {
+    return String(value);
+  }
+}
+
+/**
+ * Firebase連携の初回接続に使うセットアップコードを生成します。
+ * SpreadsheetメニューまたはApps Scriptエディタから実行し、返されたコードを虎威側に入力してください。
+ */
+export function generateFirebaseSetupCode(): string {
+  return generateSetupCode();
+}
+
+/**
+ * Spreadsheetを開いたときに虎威連携メニューを追加します。
+ */
+export function onOpen(): void {
+  SpreadsheetApp.getUi()
+    .createMenu("虎威連携")
+    .addItem("本人確認コードを生成", "showFirebaseSetupCodeDialog")
+    .addToUi();
+}
+
+/**
+ * 虎威へ入力する本人確認コードを生成し、コピーしやすいダイアログで表示します。
+ */
+export function showFirebaseSetupCodeDialog(): void {
+  const setupCode = generateFirebaseSetupCode();
+  const html = HtmlService.createHtmlOutput(
+    `
+      <div style="font-family: Arial, sans-serif; padding: 16px; color: #202124;">
+        <h2 style="font-size: 18px; margin: 0 0 12px;">虎威 本人確認コード</h2>
+        <p style="font-size: 13px; line-height: 1.7; margin: 0 0 12px;">
+          以下のコードを虎威のプロフィール画面に入力してください。<br>
+          このコードの有効期限は10分です。
+        </p>
+        <input
+          id="setupCode"
+          type="text"
+          readonly
+          value="${setupCode}"
+          style="box-sizing: border-box; width: 100%; padding: 10px; font-size: 16px; font-family: monospace;"
+        />
+        <button
+          onclick="copyCode()"
+          style="margin-top: 12px; padding: 8px 12px; border: 0; border-radius: 4px; background: #1a73e8; color: white; cursor: pointer;"
+        >
+          コピー
+        </button>
+        <span id="copyStatus" style="margin-left: 8px; font-size: 12px; color: #188038;"></span>
+        <script>
+          const input = document.getElementById('setupCode');
+          input.focus();
+          input.select();
+
+          function copyCode() {
+            input.select();
+            document.execCommand('copy');
+            document.getElementById('copyStatus').textContent = 'コピーしました';
+          }
+        </script>
+      </div>
+    `
+  )
+    .setWidth(460)
+    .setHeight(260);
+
+  SpreadsheetApp.getUi().showModalDialog(html, "虎威 本人確認コード");
+}
+
 /**
  * WebアプリへのPOSTリクエストを処理します。
  * actionとtargetパラメータに基づいて処理を分岐し、
@@ -53,6 +187,18 @@ export function doPost(e) {
   let statusCode = 200; // デフォルトのステータスコード
 
   try {
+    const isInitializeRequest =
+      target === "security" && action === "initialize";
+    if (isInitializeRequest) {
+      appendInitializeLog("received", {
+        action,
+        target,
+        contentType: e.postData?.type || "",
+        hasBody: Boolean(e.postData?.contents),
+        bodyLength: e.postData?.contents?.length || 0,
+      });
+    }
+
     // リクエストボディをパース (JSONを期待)
     let requestData: any = {}; // デフォルトではany型として定義
 
@@ -72,6 +218,42 @@ export function doPost(e) {
         "Invalid request body format. Expected application/json."
       );
     }
+
+    if (target === "security" && action === "initialize") {
+      appendInitializeLog("parsed", {
+        action,
+        target,
+        uid: requestData.uid,
+        hasSetupCode: Boolean(requestData.setupCode),
+        setupCodeLength: requestData.setupCode
+          ? String(requestData.setupCode).length
+          : 0,
+      });
+      response = initializeProxyAuth(requestData);
+      appendInitializeLog("initialized", {
+        action,
+        target,
+        uid: requestData.uid,
+        hasSetupCode: Boolean(requestData.setupCode),
+        setupCodeLength: requestData.setupCode
+          ? String(requestData.setupCode).length
+          : 0,
+        initializedAt: (response as any).initializedAt || "",
+      });
+      statusCode = 201;
+      return ContentService.createTextOutput(
+        JSON.stringify({
+          status: "success",
+          data: response,
+          code: statusCode,
+        })
+      ).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    statusCode = 401;
+    assertProxyAuthorized(e, action, target, requestData, "POST");
+    statusCode = 200;
+    requestData = stripAuthField(requestData);
 
     // action 'archive' の場合を先に処理
     if (action === "archive") {
@@ -314,6 +496,14 @@ export function doPost(e) {
     Logger.log(
       `Error in doPost (action: ${action}, target: ${target}): ${error.message}\nStack: ${error.stack}`
     );
+    if (target === "security" && action === "initialize") {
+      appendInitializeLog("error", {
+        action,
+        target,
+        message: error.message,
+        stack: error.stack,
+      });
+    }
     // TODO: Errorシートへの記録処理をここに追加する可能性あり
     const errorStatusCode = statusCode !== 200 ? statusCode : 400; // エラー発生前のstatusCodeが400系ならそれを、そうでなければ400をデフォルトにする
     return ContentService.createTextOutput(
@@ -340,6 +530,21 @@ export function doGet(e) {
   let statusCode = 200; // デフォルト
 
   try {
+    if (target === "security" && action === "status") {
+      response = getSecurityStatus();
+      return ContentService.createTextOutput(
+        JSON.stringify({
+          status: "success",
+          data: response,
+          code: statusCode,
+        })
+      ).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    statusCode = 401;
+    assertProxyAuthorized(e, action, target, {}, "GET");
+    statusCode = 200;
+
     // targetに基づいて処理を分岐
     switch (target) {
       case "xauth":

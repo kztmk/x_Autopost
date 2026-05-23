@@ -51,12 +51,12 @@ function createXAuth(authInfo): object {
 
 /**
  * プロパティに保存されている全てのX認証情報のaccountIdリストを取得します。
- * @return {XAuthInfo[]} 登録されているX認証情報の配列。
+ * @return {Array<{accountId: string, note?: string}>} 登録されているX認証情報の公開可能な情報。
  */
 function getXAuthAll() {
   const properties = PropertiesService.getScriptProperties();
   const keys = properties.getKeys();
-  const authAccountInfo: XAuthInfo[] = [];
+  const authAccountInfo: Array<Pick<XAuthInfo, "accountId" | "note">> = [];
   const prefix = "xauth_"; // 保存時に使用したキーのプレフィックス
 
   for (const key of keys) {
@@ -68,12 +68,8 @@ function getXAuthAll() {
           const authInfo = JSON.parse(authInfoString);
           // accountId が存在すればリストに追加
           if (authInfo && authInfo.accountId) {
-            const xauthInfo: XAuthInfo = {
+            const xauthInfo: Pick<XAuthInfo, "accountId" | "note"> = {
               accountId: authInfo.accountId,
-              apiKey: authInfo.apiKey,
-              apiKeySecret: authInfo.apiKeySecret,
-              accessToken: authInfo.accessToken,
-              accessTokenSecret: authInfo.accessTokenSecret,
               note: authInfo.note || "", // noteフィールドがあれば追加,
             };
 
