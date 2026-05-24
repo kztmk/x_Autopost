@@ -308,10 +308,7 @@ function assertNotReplay(requestId: string): void {
 }
 
 function createRandomCode(): string {
-  const raw = (
-    Utilities.getUuid().replace(/-/g, "") +
-    Utilities.getUuid().replace(/-/g, "")
-  ).toUpperCase();
+  const raw = Utilities.getUuid().replace(/-/g, "").toUpperCase();
   return `${raw.slice(0, 8)}-${raw.slice(8, 16)}-${raw.slice(16, 24)}`;
 }
 
