@@ -225,13 +225,12 @@ function getQuerySignatureBody(e: any): { [key: string]: any } {
 
       const value = rawParameters[key];
       if (Array.isArray(value)) {
-        sanitized[key] =
-          value.length === 1 ? String(value[0]) : value.map((item) => String(item));
+        sanitized[key] = value.map((item) => String(item));
         return;
       }
 
       if (value !== undefined) {
-        sanitized[key] = String(value);
+        sanitized[key] = [String(value)];
       }
     });
     return sanitized;
@@ -241,7 +240,7 @@ function getQuerySignatureBody(e: any): { [key: string]: any } {
     e && e.parameter && typeof e.parameter === "object" ? e.parameter : {};
   Object.keys(parameters).forEach((key) => {
     if (!isAuthQueryParam(key)) {
-      sanitized[key] = String(parameters[key]);
+      sanitized[key] = [String(parameters[key])];
     }
   });
   return sanitized;
@@ -284,7 +283,9 @@ function stableStringify(value: any): string {
   }
 
   if (typeof value === "object") {
-    const keys = Object.keys(value).sort();
+    const keys = Object.keys(value)
+      .filter((key) => value[key] !== undefined)
+      .sort();
     return `{${keys
       .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
       .join(",")}}`;
