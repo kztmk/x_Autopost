@@ -9,6 +9,13 @@ const SECURITY_PROP_KEYS = {
 const SETUP_CODE_TTL_MS = 10 * 60 * 1000;
 const REQUEST_TOLERANCE_MS = 5 * 60 * 1000;
 const REPLAY_CACHE_TTL_SECONDS = 5 * 60;
+const AUTH_QUERY_PARAM_KEYS = {
+  uid: true,
+  firebaseUid: true,
+  timestamp: true,
+  signature: true,
+  requestId: true,
+} as const;
 
 interface ProxyAuthPayload {
   uid?: string;
@@ -100,7 +107,7 @@ export function initializeProxyAuth(requestData: InitializeRequest) {
     proxySecret,
     signatureAlgorithm: "HMAC_SHA256_BASE64_WEBSAFE",
     signaturePayload:
-      "timestamp.uid.action.target.stableJsonBodyWithoutAuth",
+      "timestamp.uid.action.target.stableJsonPayloadWithoutAuth",
   };
 }
 
@@ -149,7 +156,7 @@ export function assertProxyAuthorized(
   assertNotReplay(requestId);
 
   const bodyForSignature =
-    method === "POST" ? stripAuthField(requestData) : {};
+    method === "POST" ? stripAuthField(requestData) : getQuerySignatureBody(e);
   const expectedSignature = createRequestSignature(
     proxySecret,
     String(timestamp),
@@ -203,6 +210,45 @@ function getAuthPayload(
     signature: e.parameter.signature,
     requestId: e.parameter.requestId,
   };
+}
+
+function getQuerySignatureBody(e: any): { [key: string]: any } {
+  const sanitized: { [key: string]: any } = {};
+  const rawParameters =
+    e && e.parameters && typeof e.parameters === "object" ? e.parameters : null;
+
+  if (rawParameters) {
+    Object.keys(rawParameters).forEach((key) => {
+      if (isAuthQueryParam(key)) {
+        return;
+      }
+
+      const value = rawParameters[key];
+      if (Array.isArray(value)) {
+        sanitized[key] =
+          value.length === 1 ? String(value[0]) : value.map((item) => String(item));
+        return;
+      }
+
+      if (value !== undefined) {
+        sanitized[key] = String(value);
+      }
+    });
+    return sanitized;
+  }
+
+  const parameters =
+    e && e.parameter && typeof e.parameter === "object" ? e.parameter : {};
+  Object.keys(parameters).forEach((key) => {
+    if (!isAuthQueryParam(key)) {
+      sanitized[key] = String(parameters[key]);
+    }
+  });
+  return sanitized;
+}
+
+function isAuthQueryParam(key: string): boolean {
+  return Boolean((AUTH_QUERY_PARAM_KEYS as { [key: string]: boolean })[key]);
 }
 
 function createRequestSignature(
