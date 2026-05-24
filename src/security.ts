@@ -88,9 +88,7 @@ export function initializeProxyAuth(requestData: InitializeRequest) {
     throw new Error("Invalid setup code.");
   }
 
-  const proxySecret =
-    Utilities.getUuid().replace(/-/g, "") +
-    Utilities.getUuid().replace(/-/g, "");
+  const proxySecret = createProxySecret(uid, expectedHash);
   const initializedAt = new Date().toISOString();
 
   properties.setProperties({
@@ -315,6 +313,28 @@ function createRandomCode(): string {
     Utilities.getUuid().replace(/-/g, "")
   ).toUpperCase();
   return `${raw.slice(0, 8)}-${raw.slice(8, 16)}-${raw.slice(16, 24)}`;
+}
+
+function createProxySecret(uid: string, setupCodeHash: string): string {
+  const seed = [
+    Utilities.getUuid(),
+    Utilities.getUuid(),
+    Utilities.getUuid(),
+    uid,
+    setupCodeHash,
+    String(Date.now()),
+    getScriptIdForEntropy(),
+  ].join(".");
+
+  return sha256Base64(seed);
+}
+
+function getScriptIdForEntropy(): string {
+  try {
+    return ScriptApp.getScriptId();
+  } catch (error) {
+    return "script-id-unavailable";
+  }
 }
 
 function sha256Base64(value: string): string {
