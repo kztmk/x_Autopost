@@ -53,6 +53,11 @@ function appendInitializeLog(
   details: { [key: string]: any } = {}
 ): void {
   try {
+    const logDetails = { ...details };
+    if (logDetails.uid) {
+      logDetails.uid = maskLogValue(String(logDetails.uid));
+    }
+
     const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
     if (!spreadsheet) {
       Logger.log(`initialize log skipped: active spreadsheet not found.`);
@@ -78,13 +83,13 @@ function appendInitializeLog(
     sheet.appendRow([
       new Date(),
       phase,
-      details.action || "",
-      details.target || "",
-      details.uid ? maskLogValue(String(details.uid)) : "",
-      details.hasSetupCode === undefined ? "" : Boolean(details.hasSetupCode),
-      details.setupCodeLength || "",
-      details.message || "",
-      safeStringify(details),
+      logDetails.action || "",
+      logDetails.target || "",
+      logDetails.uid || "",
+      logDetails.hasSetupCode === undefined ? "" : Boolean(logDetails.hasSetupCode),
+      logDetails.setupCodeLength || "",
+      logDetails.message || "",
+      safeStringify(logDetails),
     ]);
   } catch (logError: any) {
     Logger.log(`initialize log failed: ${logError.message}`);
