@@ -47,11 +47,10 @@ export function generateSetupCode(): string {
 
 export function getSecurityStatus() {
   const properties = PropertiesService.getScriptProperties();
-  const ownerUid = properties.getProperty(SECURITY_PROP_KEYS.ownerUid);
-  const initializedAt = properties.getProperty(SECURITY_PROP_KEYS.initializedAt);
-  const setupCodeExpiresAt = properties.getProperty(
-    SECURITY_PROP_KEYS.setupCodeExpiresAt
-  );
+  const allProps = properties.getProperties();
+  const ownerUid = allProps[SECURITY_PROP_KEYS.ownerUid];
+  const initializedAt = allProps[SECURITY_PROP_KEYS.initializedAt];
+  const setupCodeExpiresAt = allProps[SECURITY_PROP_KEYS.setupCodeExpiresAt];
 
   return {
     initialized: Boolean(ownerUid),
@@ -70,9 +69,10 @@ export function initializeProxyAuth(requestData: InitializeRequest) {
   const uid = normalizeRequiredString(requestData.uid, "uid");
   const setupCode = normalizeRequiredString(requestData.setupCode, "setupCode");
   const properties = PropertiesService.getScriptProperties();
-  const expectedHash = properties.getProperty(SECURITY_PROP_KEYS.setupCodeHash);
+  const allProps = properties.getProperties();
+  const expectedHash = allProps[SECURITY_PROP_KEYS.setupCodeHash];
   const expiresAt = Number(
-    properties.getProperty(SECURITY_PROP_KEYS.setupCodeExpiresAt) || "0"
+    allProps[SECURITY_PROP_KEYS.setupCodeExpiresAt] || "0"
   );
 
   if (!expectedHash || !expiresAt) {
@@ -117,8 +117,9 @@ export function assertProxyAuthorized(
   method: "GET" | "POST"
 ): void {
   const properties = PropertiesService.getScriptProperties();
-  const ownerUid = properties.getProperty(SECURITY_PROP_KEYS.ownerUid);
-  const proxySecret = properties.getProperty(SECURITY_PROP_KEYS.proxySecret);
+  const allProps = properties.getProperties();
+  const ownerUid = allProps[SECURITY_PROP_KEYS.ownerUid];
+  const proxySecret = allProps[SECURITY_PROP_KEYS.proxySecret];
 
   if (!ownerUid || !proxySecret) {
     throw new Error("Proxy authorization is not initialized.");
