@@ -276,7 +276,7 @@ function stableStringify(value: any): string {
     return `[${value.map((item) => stableStringify(item)).join(",")}]`;
   }
 
-  if (value instanceof Date) {
+  if (Object.prototype.toString.call(value) === "[object Date]") {
     return JSON.stringify(value.toISOString());
   }
 
