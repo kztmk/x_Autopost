@@ -9,13 +9,13 @@ const SECURITY_PROP_KEYS = {
 const SETUP_CODE_TTL_MS = 10 * 60 * 1000;
 const REQUEST_TOLERANCE_MS = 5 * 60 * 1000;
 const REPLAY_CACHE_TTL_SECONDS = 5 * 60;
-const AUTH_QUERY_PARAM_KEYS = {
-  uid: true,
-  firebaseUid: true,
-  timestamp: true,
-  signature: true,
-  requestId: true,
-} as const;
+const AUTH_QUERY_PARAM_KEYS = new Set<string>([
+  "uid",
+  "firebaseUid",
+  "timestamp",
+  "signature",
+  "requestId",
+]);
 
 interface ProxyAuthPayload {
   uid?: string;
@@ -246,7 +246,7 @@ function getQuerySignatureBody(e: any): { [key: string]: any } {
 }
 
 function isAuthQueryParam(key: string): boolean {
-  return Boolean((AUTH_QUERY_PARAM_KEYS as { [key: string]: boolean })[key]);
+  return AUTH_QUERY_PARAM_KEYS.has(key);
 }
 
 function createRequestSignature(
