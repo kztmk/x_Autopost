@@ -1,7 +1,7 @@
 {
   "name": "x-autopost-library",
   "version": "2.0.0",
-  "description": "",
+  "description": "X-AutoPost is a Google Apps Script library that enables users to automate posting content to various platforms, such as social media or blogs, on a scheduled basis. It provides an easy-to-use interface for managing and scheduling posts, making it ideal for individuals and businesses looking to maintain a consistent online presence without manual effort.",
   "author": "kztmk",
   "license": "MIT",
   "scripts": {
