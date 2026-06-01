@@ -15,6 +15,7 @@ X Autopost is a scheduled posting system that allows you to prepare posts in adv
 - **Multiple Account Management**: Support for multiple X accounts via `PropertiesService`. Credentials are stored securely.
 - **Error Handling**: Comprehensive error logging to a dedicated Google Sheet (`Errors`).
 - **REST API**: API support for managing authentication, posts, triggers, and archiving.
+- **Torai Connection Verification**: Generates a one-time setup code from the spreadsheet menu and initializes Firebase UID-based proxy authorization.
 - **Archive System**: Archive posted content and errors to a separate spreadsheet.
 - **Trigger Management**: Create, delete, and check the status of time-based triggers via API.
 - **Automatic Trigger Deletion**: Automatically deletes the posting trigger if no scheduled posts remain.
@@ -52,6 +53,9 @@ The system provides several POST endpoints accessible via `doPost()`:
 | `trigger`  | `create`          | Create time-based trigger           | `api/triggers.ts` |
 |            | `delete`          | Delete all triggers                 | `api/triggers.ts` |
 | `archive`  | -                 | Archive "Posted" or "Errors" sheets | `api/archive.ts`  |
+| `security` | `initialize`      | Initialize Torai proxy authorization with a setup code | `security.ts` |
+
+The `security.initialize` endpoint is the only unauthenticated POST endpoint. It is used once from Torai after the spreadsheet owner generates a setup code from the spreadsheet menu. All other POST endpoints require a signed proxy authorization payload.
 
 ### GET Endpoints
 
@@ -64,6 +68,9 @@ The system provides several GET endpoints accessible via `doGet()`:
 | `postedData` | `fetch`  | Fetch all posted data                    | `api/postData.ts` |
 | `errorData`  | `fetch`  | Fetch all error data                     | `api/postData.ts` |
 | `trigger`    | `status` | Check if a trigger exists for a function | `api/triggers.ts` |
+| `security`   | `status` | Check whether Torai proxy authorization has been initialized | `security.ts` |
+
+All GET endpoints except `security.status` require signed proxy authorization query parameters.
 
 ## Data Structure
 
@@ -111,6 +118,18 @@ Stores X API credentials securely using Google Apps Script's `PropertiesService`
 - `accessToken`: X API access token.
 - `accessTokenSecret`: X API access token secret.
 - `note`: (Optional) A user-defined note for the account.
+
+### Torai Proxy Security Properties (`PropertiesService`)
+
+Torai integration state is stored in Apps Script `PropertiesService`, not in a visible sheet:
+
+- `security_ownerUid`: Firebase UID allowed to access this spreadsheet through Torai.
+- `security_proxySecret`: Shared secret used by Torai's Firebase Functions proxy to sign requests.
+- `security_initializedAt`: ISO timestamp of the completed initialization.
+- `security_setupCodeHash`: Hash of the temporary setup code generated from the spreadsheet menu.
+- `security_setupCodeExpiresAt`: Expiration timestamp for the temporary setup code.
+
+The setup code itself and the proxy secret are never written to the spreadsheet. Initialization and errors are logged to a `log` sheet with masked UID and setup-code metadata only.
 
 ## Automated Posting Workflow (`main.ts`)
 
@@ -169,7 +188,17 @@ Stores X API credentials securely using Google Apps Script's `PropertiesService`
     - Description: (Optional) Add a description.
     - Execute as: Me
     - Who has access: Anyone (or restrict as needed, but the script needs to be executable by the trigger). **Important:** Deploying with "Anyone" access makes your API endpoints public. Consider adding authentication/authorization if needed.
-8.  Create an initial time-based trigger via the API (`POST ?target=trigger&action=create`) or manually in the Apps Script editor (Triggers > Add Trigger) to run `autoPostToX` (e.g., every 5 minutes). The script will manage deleting this trigger if the post queue becomes empty.
+8.  Reload the spreadsheet. A `Torai Link` menu is added as `虎威連携`.
+9.  In the spreadsheet, open `虎威連携` > `本人確認コードを生成`.
+10. Copy the generated setup code. The setup code is valid for 10 minutes.
+11. In Torai, open the profile/API settings screen and enter:
+    - The deployed GAS Web App `/exec` URL.
+    - The setup code generated from the spreadsheet menu.
+12. Save the Torai settings. Torai calls `POST ?target=security&action=initialize`, stores the Firebase UID and proxy secret in Apps Script properties, and stores the proxy secret server-side in Firebase.
+13. After initialization succeeds, reload the Torai profile screen. The GAS URL is shown read-only until the user chooses to change it, and a new setup code is required if the GAS URL changes.
+14. Create an initial time-based trigger via the API (`POST ?target=trigger&action=create`) or manually in the Apps Script editor (Triggers > Add Trigger) to run `autoPostToX` (e.g., every 5 minutes). The script will manage deleting this trigger if the post queue becomes empty.
+
+Important deployment note: after editing `code.js` in Apps Script, click Save and deploy a new Web App version. `clasp push` or pasting code alone may leave the `/exec` URL serving an older deployed version.
 
 ## Trigger Management (`api/triggers.ts`)
 
@@ -179,8 +208,12 @@ Stores X API credentials securely using Google Apps Script's `PropertiesService`
 
 ## Security Considerations
 
-- X API credentials should be handled securely. Storing them in the `XAuth` sheet requires appropriate sheet protection if collaborators have access.
-- The deployed Web App URL is public if access is set to "Anyone". Implement authorization within `doGet`/`doPost` if sensitive operations need protection.
+- X API credentials are stored in `PropertiesService`.
+- The deployed Web App URL may be public if access is set to "Anyone", but regular API access is protected by Torai proxy authorization.
+- `POST ?target=security&action=initialize` is intentionally unauthenticated so the owner can complete the first connection from Torai. It requires a valid, unexpired setup code generated from the spreadsheet menu.
+- After initialization, requests must include a Firebase UID, timestamp, request ID, and HMAC signature generated by Torai's Firebase Functions proxy.
+- The signature is checked against the stored owner UID and proxy secret. Requests outside the allowed timestamp window or replayed request IDs are rejected.
+- If the GAS URL is changed in Torai, a new setup code must be generated from the spreadsheet menu and initialization must be completed again.
 
 ## Dependencies
 
