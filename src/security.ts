@@ -203,11 +203,14 @@ function getAuthPayload(
     return requestData._auth;
   }
 
+  const parameter =
+    e && e.parameter && typeof e.parameter === "object" ? e.parameter : {};
+
   return {
-    uid: e.parameter.uid || e.parameter.firebaseUid,
-    timestamp: e.parameter.timestamp,
-    signature: e.parameter.signature,
-    requestId: e.parameter.requestId,
+    uid: parameter.uid || parameter.firebaseUid,
+    timestamp: parameter.timestamp,
+    signature: parameter.signature,
+    requestId: parameter.requestId,
   };
 }
 
