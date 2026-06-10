@@ -268,7 +268,11 @@ function createRequestSignature(
     stableStringify(body || {}),
   ].join(".");
   const bytes = Utilities.computeHmacSha256Signature(payload, secret);
-  return Utilities.base64EncodeWebSafe(bytes);
+  // Firebase Functions builds the web-safe Base64 signature WITHOUT trailing
+  // "=" padding (proxy.ts strips it). Strip padding here too so both sides
+  // compare equal; otherwise verification always fails with
+  // "Invalid request signature."
+  return Utilities.base64EncodeWebSafe(bytes).replace(/=+$/, "");
 }
 
 function stableStringify(value: any): string {
