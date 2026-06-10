@@ -21,7 +21,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: "16"
+          node-version: '16'
 
       - name: Install dependencies
         run: npm ci
@@ -32,12 +32,12 @@ jobs:
       - name: Determine release version
         id: version
         run: |
-          latest_tag=$(git tag -l 'v2.0.*' --sort=-v:refname | head -n 1)
+          latest_tag=$(git tag -l 'v2.1.*' --sort=-v:refname | head -n 1)
           if [ -z "$latest_tag" ]; then
-            version="v2.0.0"
+            version="v2.1.0"
           else
             patch="${latest_tag##*.}"
-            version="v2.0.$((patch + 1))"
+            version="v2.1.$((patch + 1))"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "asset_name=x-autopost-$version.zip" >> "$GITHUB_OUTPUT"
