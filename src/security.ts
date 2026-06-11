@@ -166,6 +166,20 @@ export function assertProxyAuthorized(
   );
 
   if (signature !== expectedSignature) {
+    // Diagnostic log (visible in Apps Script "Executions"). Never log the
+    // secret, full signatures, or body values — keys only.
+    console.log("Signature mismatch", {
+      method,
+      action,
+      target,
+      timestamp: timestampRaw,
+      bodyKeys:
+        bodyForSignature && typeof bodyForSignature === "object"
+          ? Object.keys(bodyForSignature).sort()
+          : typeof bodyForSignature,
+      receivedSigPrefix: signature.slice(0, 6),
+      expectedSigPrefix: expectedSignature.slice(0, 6),
+    });
     throw new Error("Invalid request signature.");
   }
 }
@@ -267,7 +281,15 @@ function createRequestSignature(
     target || "",
     stableStringify(body || {}),
   ].join(".");
-  const bytes = Utilities.computeHmacSha256Signature(payload, secret);
+  // Charset must be UTF_8 explicitly: without it, payloads containing
+  // non-ASCII characters (e.g. Japanese note/post text) are hashed with a
+  // different byte encoding than Node's createHmac (UTF-8) on the Functions
+  // side, so verification fails with "Invalid request signature."
+  const bytes = Utilities.computeHmacSha256Signature(
+    payload,
+    secret,
+    Utilities.Charset.UTF_8
+  );
   // Firebase Functions builds the web-safe Base64 signature WITHOUT trailing
   // "=" padding (proxy.ts strips it). Strip padding here too so both sides
   // compare equal; otherwise verification always fails with

@@ -98,36 +98,80 @@ function getXAuthAll() {
 
 /**
  * 指定されたaccountIdに対応するXの認証情報をプロパティサービスで更新します。
- * @param {XAuthInfo} authInfo - 更新する認証情報オブジェクト。
- *   { accountId: string, apiKey: string, apiKeySecret: string, accessToken: string, accessTokenSecret: string }
+ * 保存済みデータとマージするため、accountId以外のフィールドは省略可能です。
+ * 省略された（または空文字の）認証情報フィールドは既存の値を維持します。
+ * これによりクライアントへ機密情報を返さなくても備考(note)だけの編集が可能です。
+ * @param {Partial<XAuthInfo>} authInfo - 更新する認証情報オブジェクト。accountIdは必須。
+ *   { accountId: string, apiKey?: string, apiKeySecret?: string, accessToken?: string, accessTokenSecret?: string, note?: string }
  * @return {object} 更新成功を示すメッセージとaccountId。
- * @throws {Error} 必須フィールドが不足している場合、対象のaccountIdが見つからない場合、または更新に失敗した場合。
+ * @throws {Error} accountIdが指定されていない場合、対象のaccountIdが見つからない場合、または更新に失敗した場合。
  */
 function updateXAuth(authInfo) {
-  // 必須フィールドのチェック (accountIdと更新する値全てが必要)
-  if (
-    !authInfo.accountId ||
-    !authInfo.apiKey ||
-    !authInfo.apiKeySecret ||
-    !authInfo.accessToken ||
-    !authInfo.accessTokenSecret
-  ) {
-    throw new Error("Missing required fields for updating XAuthInfo.");
+  // 必須フィールドのチェック (キーとなるaccountIdのみ必須)
+  if (!authInfo || !authInfo.accountId) {
+    throw new Error(
+      "Missing required field: accountId for updating XAuthInfo."
+    );
   }
 
   const properties = PropertiesService.getScriptProperties();
   const propKey = `xauth_${authInfo.accountId}`; // アカウントIDからキーを特定
 
-  // 対象のプロパティが存在するか確認
-  if (!properties.getProperty(propKey)) {
+  // 対象のプロパティを取得 (存在しない場合はエラー)
+  const existingAuthInfoString = properties.getProperty(propKey);
+  if (!existingAuthInfoString) {
     throw new Error(
       `XAuthInfo for accountId '${authInfo.accountId}' not found. Cannot update.`
     );
   }
 
   try {
-    // 新しい認証情報オブジェクトをJSON文字列に変換して上書き保存
-    const newAuthInfoString = JSON.stringify(authInfo);
+    let existingAuthInfo: { [key: string]: any } = {};
+    try {
+      existingAuthInfo = JSON.parse(existingAuthInfoString) || {};
+    } catch (parseError) {
+      Logger.log(
+        `Stored XAuthInfo for accountId ${authInfo.accountId} is not valid JSON. Overwriting with new values.`
+      );
+    }
+
+    // 認証情報4種: 空でない値が送られた場合のみ更新し、それ以外は既存値を維持
+    const credentialFields = [
+      "apiKey",
+      "apiKeySecret",
+      "accessToken",
+      "accessTokenSecret",
+    ];
+    const mergedAuthInfo: { [key: string]: any } = {
+      ...existingAuthInfo,
+      accountId: authInfo.accountId,
+    };
+    for (const field of credentialFields) {
+      const incoming = authInfo[field];
+      if (typeof incoming === "string" && incoming.trim() !== "") {
+        mergedAuthInfo[field] = incoming;
+      }
+    }
+
+    // note はフィールドが送られた場合のみ更新（空文字は「備考のクリア」として有効）
+    if (authInfo.note !== undefined && authInfo.note !== null) {
+      mergedAuthInfo.note = String(authInfo.note);
+    }
+
+    // マージ後に認証情報が揃っているか検証（既存データが正常なら常に揃う）
+    const missingFields = credentialFields.filter(
+      (field) =>
+        typeof mergedAuthInfo[field] !== "string" ||
+        mergedAuthInfo[field].trim() === ""
+    );
+    if (missingFields.length > 0) {
+      throw new Error(
+        `Stored XAuthInfo for accountId '${authInfo.accountId}' is incomplete (missing: ${missingFields.join(", ")}). Re-register all credentials.`
+      );
+    }
+
+    // マージした認証情報オブジェクトをJSON文字列に変換して上書き保存
+    const newAuthInfoString = JSON.stringify(mergedAuthInfo);
     properties.setProperty(propKey, newAuthInfoString);
 
     Logger.log(`XAuthInfo updated for accountId: ${authInfo.accountId}`);
