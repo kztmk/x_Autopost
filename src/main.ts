@@ -14,6 +14,41 @@ const TRIGGER_INTERVAL_PREFIX = "triggerInterval_";
 const DEFAULT_TRIGGER_INTERVAL = 5;
 const HANDLER_FUNCTION_NAME = "autoPostToX";
 
+class ReplyTargetPendingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ReplyTargetPendingError";
+  }
+}
+
+class PublishedPostMoveError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PublishedPostMoveError";
+  }
+}
+
+function normalizeSheetValue(value: any): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  return String(value).trim();
+}
+
+function isUsableReplyPostId(value: any): boolean {
+  const postId = normalizeSheetValue(value);
+  return Boolean(
+    postId &&
+      postId.toUpperCase() !== "ERROR" &&
+      !postId.startsWith("Reposted:")
+  );
+}
+
+function isProcessedPostId(value: any): boolean {
+  const postId = normalizeSheetValue(value);
+  return Boolean(postId && postId.toUpperCase() !== "ERROR");
+}
+
 /**
  * トリガーの間隔（分）を PropertiesService から取得します。
  * @param {string} functionName トリガーのハンドラ関数名
@@ -162,8 +197,33 @@ function findNextScheduledPost(
     return 0; // Keep order if both are invalid/missing
   });
 
-  // Return the first eligible post
-  return postsToProcess.length > 0 ? postsToProcess[0] : null;
+  const eligibleIds = new Set(
+    postsToProcess
+      .map((post) => normalizeSheetValue(post.rowData[idIndex]))
+      .filter(Boolean)
+  );
+  const inReplyToInternalIndex = postsHeaderMap["inReplyToInternal"];
+
+  // Return the first post whose parent is not also waiting in this interval.
+  for (const post of postsToProcess) {
+    const inReplyToInternal =
+      inReplyToInternalIndex !== undefined
+        ? normalizeSheetValue(post.rowData[inReplyToInternalIndex])
+        : "";
+
+    if (inReplyToInternal && eligibleIds.has(inReplyToInternal)) {
+      Logger.log(
+        `Deferring reply post ${normalizeSheetValue(
+          post.rowData[idIndex]
+        )} because parent ${inReplyToInternal} is also eligible and should be posted first.`
+      );
+      continue;
+    }
+
+    return post;
+  }
+
+  return null;
 }
 
 // --- Main Function ---
@@ -186,7 +246,7 @@ async function autoPostToX() {
     const postedHeaderRow = postedSheet
       .getRange(1, 1, 1, postedSheet.getLastColumn())
       .getValues()[0];
-    const postsData = postsSheet.getDataRange().getValues();
+    let postsData = postsSheet.getDataRange().getValues();
 
     if (postsData.length < 1) {
       Logger.log("No data found in Posts sheet.");
@@ -204,6 +264,14 @@ async function autoPostToX() {
     postedHeaderRow.forEach((header, index) => {
       postedHeaderMap[header as string] = index;
     });
+
+    recoverProcessedPosts(
+      postsSheet,
+      postedSheet,
+      postsHeaderMap,
+      postedHeaderMap
+    );
+    postsData = postsSheet.getDataRange().getValues();
 
     // Get trigger interval
     const triggerIntervalMinutes = getTriggerIntervalMinutes(
@@ -257,6 +325,28 @@ async function autoPostToX() {
         Logger.log(
           `Error processing post (Internal ID: ${internalPostId}, Row: ${rowIndex}): ${e.message}`
         );
+        if (e instanceof ReplyTargetPendingError) {
+          Logger.log(
+            `Reply target is still pending for post ${internalPostId}; leaving the row queued for a later run.`
+          );
+          return;
+        }
+        if (e instanceof PublishedPostMoveError) {
+          logErrorToSheet(
+            {
+              message: e.message,
+              stack: e.stack || "",
+              context: `autoPostToX - Moving Published Post Row ${rowIndex}`,
+              timestamp: new Date().toISOString(),
+              postContent: postContent.substring(0, 20),
+            },
+            "Published Post Move Error"
+          );
+          Logger.log(
+            `Published post move failed for ${internalPostId}; row was not marked failed because the X post already exists.`
+          );
+          return;
+        }
         logErrorToSheet(
           {
             message: e.message,
@@ -368,38 +458,93 @@ async function getReplyToPostId(
   postsSheet: GoogleAppsScript.Spreadsheet.Sheet,
   postedSheet: GoogleAppsScript.Spreadsheet.Sheet
 ): Promise<string | null> {
-  // Postsシートで検索
-  const postsData = postsSheet.getDataRange().getValues();
-  const postsHeaders = postsData[0];
-  const idIndex = postsHeaders.indexOf("id");
-  const postIdIndex = postsHeaders.indexOf("postId");
-
-  if (idIndex !== -1 && postIdIndex !== -1) {
-    for (let i = 1; i < postsData.length; i++) {
-      if (postsData[i][idIndex] === internalId && postsData[i][postIdIndex]) {
-        return postsData[i][postIdIndex];
-      }
-    }
-  }
+  const targetInternalId = normalizeSheetValue(internalId);
 
   // Postedシートで検索
   const postedData = postedSheet.getDataRange().getValues();
-  const postedHeaders = postedData[0];
+  const postedHeaders = postedData[0] || [];
   const postedIdIndex = postedHeaders.indexOf("id");
   const postedPostIdIndex = postedHeaders.indexOf("postId");
 
   if (postedIdIndex !== -1 && postedPostIdIndex !== -1) {
     for (let i = 1; i < postedData.length; i++) {
       if (
-        postedData[i][postedIdIndex] === internalId &&
-        postedData[i][postedPostIdIndex]
+        normalizeSheetValue(postedData[i][postedIdIndex]) ===
+          targetInternalId &&
+        isUsableReplyPostId(postedData[i][postedPostIdIndex])
       ) {
-        return postedData[i][postedPostIdIndex];
+        return normalizeSheetValue(postedData[i][postedPostIdIndex]);
+      }
+    }
+  }
+
+  // Fallback for rows written with the canonical Posted order under older headers.
+  const canonicalPostedIdIndex = HEADERS.POSTED_HEADERS.indexOf("id");
+  const canonicalPostedPostIdIndex = HEADERS.POSTED_HEADERS.indexOf("postId");
+  if (
+    canonicalPostedIdIndex !== postedIdIndex ||
+    canonicalPostedPostIdIndex !== postedPostIdIndex
+  ) {
+    for (let i = 1; i < postedData.length; i++) {
+      if (
+        normalizeSheetValue(postedData[i][canonicalPostedIdIndex]) ===
+          targetInternalId &&
+        isUsableReplyPostId(postedData[i][canonicalPostedPostIdIndex])
+      ) {
+        return normalizeSheetValue(postedData[i][canonicalPostedPostIdIndex]);
+      }
+    }
+  }
+
+  // Postsシートで検索
+  const postsData = postsSheet.getDataRange().getValues();
+  const postsHeaders = postsData[0] || [];
+  const idIndex = postsHeaders.indexOf("id");
+  const postIdIndex = postsHeaders.indexOf("postId");
+
+  if (idIndex !== -1 && postIdIndex !== -1) {
+    for (let i = 1; i < postsData.length; i++) {
+      if (
+        normalizeSheetValue(postsData[i][idIndex]) === targetInternalId &&
+        isUsableReplyPostId(postsData[i][postIdIndex])
+      ) {
+        return normalizeSheetValue(postsData[i][postIdIndex]);
       }
     }
   }
 
   return null;
+}
+
+function isPendingInternalPost(
+  internalId: string,
+  postsSheet: GoogleAppsScript.Spreadsheet.Sheet
+): boolean {
+  const targetInternalId = normalizeSheetValue(internalId);
+  const postsData = postsSheet.getDataRange().getValues();
+  const postsHeaders = postsData[0] || [];
+  const idIndex = postsHeaders.indexOf("id");
+  const postIdIndex = postsHeaders.indexOf("postId");
+  const statusIndex = postsHeaders.indexOf("status");
+
+  if (idIndex === -1) {
+    return false;
+  }
+
+  for (let i = 1; i < postsData.length; i++) {
+    if (normalizeSheetValue(postsData[i][idIndex]) !== targetInternalId) {
+      continue;
+    }
+
+    const status =
+      statusIndex !== -1 ? normalizeSheetValue(postsData[i][statusIndex]) : "";
+    const postId =
+      postIdIndex !== -1 ? normalizeSheetValue(postsData[i][postIdIndex]) : "";
+
+    return !isUsableReplyPostId(postId) && status !== "failed";
+  }
+
+  return false;
 }
 
 /**
@@ -411,46 +556,228 @@ function preparePostedRow(
   resultInReplyToId: string | null,
   postedHeaderMap: HeaderMap
 ): any[] {
-  const postedRow: any[] = [];
   const postedAt = new Date();
-
-  // Define the headers that should be in the Posted sheet
-  const expectedHeaders = [
-    "id",
-    "createdAt",
-    "postedAt",
-    "postTo",
-    "contents",
-    "mediaUrls",
-    "postSchedule",
-    "inReplyToInternal",
-    "postId",
-    "inReplyToOnX",
-    "quoteId",
-  ];
+  const headersFromSheet = Object.keys(postedHeaderMap)
+    .filter((header) => header)
+    .sort((a, b) => postedHeaderMap[a] - postedHeaderMap[b]);
+  const targetHeaders =
+    headersFromSheet.length > 0 ? headersFromSheet : [...HEADERS.POSTED_HEADERS];
 
   // Fill the row based on the expected headers
-  expectedHeaders.forEach((header) => {
+  return targetHeaders.map((header) => {
     switch (header) {
       case "postedAt":
-        postedRow.push(postedAt.toISOString());
-        break;
+        return postedAt.toISOString();
       case "postId":
-        postedRow.push(resultPostId);
-        break;
+        return resultPostId;
       case "inReplyToOnX":
-        postedRow.push(resultInReplyToId || "");
-        break;
+        return resultInReplyToId || "";
       default:
         // Copy from original post object if exists
-        postedRow.push(
-          postObject[header] !== undefined ? postObject[header] : ""
-        );
-        break;
+        return postObject[header] !== undefined ? postObject[header] : "";
     }
   });
+}
 
-  return postedRow;
+function appendPostedRowIfMissing(
+  postObject: any,
+  resultPostId: string,
+  resultInReplyToId: string | null,
+  postedSheet: GoogleAppsScript.Spreadsheet.Sheet,
+  postedHeaderMap: HeaderMap
+): void {
+  const internalId = normalizeSheetValue(postObject.id);
+  const postedData = postedSheet.getDataRange().getValues();
+  const postedHeaders = postedData[0] || [];
+  const idIndex = postedHeaders.indexOf("id");
+
+  if (internalId && idIndex !== -1) {
+    for (let i = 1; i < postedData.length; i++) {
+      if (normalizeSheetValue(postedData[i][idIndex]) === internalId) {
+        Logger.log(
+          `Posted row for internal ID ${internalId} already exists. Skipping append.`
+        );
+        return;
+      }
+    }
+  }
+
+  const canonicalIdIndex = HEADERS.POSTED_HEADERS.indexOf("id");
+  if (internalId && canonicalIdIndex !== idIndex) {
+    for (let i = 1; i < postedData.length; i++) {
+      if (normalizeSheetValue(postedData[i][canonicalIdIndex]) === internalId) {
+        Logger.log(
+          `Posted row for internal ID ${internalId} already exists in canonical column order. Skipping append.`
+        );
+        return;
+      }
+    }
+  }
+
+  const postedRowData = preparePostedRow(
+    postObject,
+    resultPostId,
+    resultInReplyToId,
+    postedHeaderMap
+  );
+  postedSheet.appendRow(postedRowData);
+}
+
+function findPostedPostIdByInternalId(
+  postedSheet: GoogleAppsScript.Spreadsheet.Sheet,
+  internalId: string
+): string | null {
+  const targetInternalId = normalizeSheetValue(internalId);
+  if (!targetInternalId) {
+    return null;
+  }
+
+  const postedData = postedSheet.getDataRange().getValues();
+  const postedHeaders = postedData[0] || [];
+  const idIndex = postedHeaders.indexOf("id");
+  const postIdIndex = postedHeaders.indexOf("postId");
+
+  if (idIndex !== -1 && postIdIndex !== -1) {
+    for (let i = 1; i < postedData.length; i++) {
+      if (
+        normalizeSheetValue(postedData[i][idIndex]) === targetInternalId &&
+        isProcessedPostId(postedData[i][postIdIndex])
+      ) {
+        return normalizeSheetValue(postedData[i][postIdIndex]);
+      }
+    }
+  }
+
+  const canonicalIdIndex = HEADERS.POSTED_HEADERS.indexOf("id");
+  const canonicalPostIdIndex = HEADERS.POSTED_HEADERS.indexOf("postId");
+  if (canonicalIdIndex !== idIndex || canonicalPostIdIndex !== postIdIndex) {
+    for (let i = 1; i < postedData.length; i++) {
+      if (
+        normalizeSheetValue(postedData[i][canonicalIdIndex]) ===
+          targetInternalId &&
+        isProcessedPostId(postedData[i][canonicalPostIdIndex])
+      ) {
+        return normalizeSheetValue(postedData[i][canonicalPostIdIndex]);
+      }
+    }
+  }
+
+  return null;
+}
+
+function updateSourceRowAfterPublish(
+  postsSheet: GoogleAppsScript.Spreadsheet.Sheet,
+  rowNum: number,
+  postsHeaderMap: HeaderMap,
+  resultPostId: string,
+  resultInReplyToId: string | null
+): void {
+  const postIdIndex = postsHeaderMap["postId"];
+  if (postIdIndex !== undefined) {
+    postsSheet.getRange(rowNum, postIdIndex + 1).setValue(resultPostId);
+  }
+
+  const inReplyToOnXIndex = postsHeaderMap["inReplyToOnX"];
+  if (inReplyToOnXIndex !== undefined) {
+    postsSheet
+      .getRange(rowNum, inReplyToOnXIndex + 1)
+      .setValue(resultInReplyToId || "");
+  }
+
+  const statusIndex = postsHeaderMap["status"];
+  if (statusIndex !== undefined) {
+    postsSheet.getRange(rowNum, statusIndex + 1).setValue("posted");
+  }
+
+  const errorMessageIndex = postsHeaderMap["errorMessage"];
+  if (errorMessageIndex !== undefined) {
+    postsSheet.getRange(rowNum, errorMessageIndex + 1).setValue("");
+  }
+
+  SpreadsheetApp.flush();
+}
+
+function deletePostRowByInternalId(
+  postsSheet: GoogleAppsScript.Spreadsheet.Sheet,
+  internalId: string
+): boolean {
+  const targetInternalId = normalizeSheetValue(internalId);
+  if (!targetInternalId) {
+    return false;
+  }
+
+  const data = postsSheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const idIndex = headers.indexOf("id");
+  if (idIndex === -1) {
+    return false;
+  }
+
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (normalizeSheetValue(data[i][idIndex]) === targetInternalId) {
+      postsSheet.deleteRow(i + 1);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function recoverProcessedPosts(
+  postsSheet: GoogleAppsScript.Spreadsheet.Sheet,
+  postedSheet: GoogleAppsScript.Spreadsheet.Sheet,
+  postsHeaderMap: HeaderMap,
+  postedHeaderMap: HeaderMap
+): void {
+  const data = postsSheet.getDataRange().getValues();
+  const idIndex = postsHeaderMap["id"];
+  const postIdIndex = postsHeaderMap["postId"];
+  const inReplyToOnXIndex = postsHeaderMap["inReplyToOnX"];
+
+  if (idIndex === undefined || postIdIndex === undefined || data.length <= 1) {
+    return;
+  }
+
+  for (let i = data.length - 1; i >= 1; i--) {
+    const row = data[i];
+    const internalId = normalizeSheetValue(row[idIndex]);
+    const resultPostId = normalizeSheetValue(row[postIdIndex]);
+
+    if (!internalId) {
+      continue;
+    }
+
+    const postedPostId = findPostedPostIdByInternalId(postedSheet, internalId);
+    if (!isProcessedPostId(resultPostId) && postedPostId) {
+      Logger.log(
+        `Removing duplicate scheduled row ${internalId} because it already exists in Posted (${postedPostId}).`
+      );
+      postsSheet.deleteRow(i + 1);
+      continue;
+    }
+
+    if (!isProcessedPostId(resultPostId)) {
+      continue;
+    }
+
+    const postObject = mapRowToObject(row, postsHeaderMap);
+    const resultInReplyToId =
+      inReplyToOnXIndex !== undefined
+        ? normalizeSheetValue(row[inReplyToOnXIndex])
+        : "";
+
+    Logger.log(
+      `Recovering already-published post ${internalId} (${resultPostId}) from Posts to Posted.`
+    );
+    appendPostedRowIfMissing(
+      postObject,
+      resultPostId,
+      resultInReplyToId || null,
+      postedSheet,
+      postedHeaderMap
+    );
+    postsSheet.deleteRow(i + 1);
+  }
 }
 
 /**
@@ -514,6 +841,11 @@ async function processPost(
           postedSheet
         );
         if (!replyToTweetId) {
+          if (isPendingInternalPost(postObject.inReplyToInternal, postsSheet)) {
+            throw new ReplyTargetPendingError(
+              `Reply target is not posted yet for internal reply ID: ${postObject.inReplyToInternal}`
+            );
+          }
           throw new Error(
             `Could not find original tweet ID for internal reply ID: ${postObject.inReplyToInternal}`
           );
@@ -569,17 +901,33 @@ async function processPost(
       `Success! Post ID: ${resultPostId}. Moving row ${rowNum} to Posted sheet.`
     );
 
-    // Postedシートに行を追加
-    const postedRowData = preparePostedRow(
-      postObject,
-      resultPostId,
-      resultInReplyToId,
-      postedHeaderMap
-    );
-    postedSheet.appendRow(postedRowData);
+    try {
+      updateSourceRowAfterPublish(
+        postsSheet,
+        rowNum,
+        postsHeaderMap,
+        resultPostId,
+        resultInReplyToId
+      );
 
-    // Postsシートから行を削除
-    postsSheet.deleteRow(rowNum);
+      appendPostedRowIfMissing(
+        postObject,
+        resultPostId,
+        resultInReplyToId,
+        postedSheet,
+        postedHeaderMap
+      );
+
+      if (!deletePostRowByInternalId(postsSheet, postObject.id)) {
+        throw new Error(
+          `Could not find source row to remove. Internal ID: ${postObject.id}`
+        );
+      }
+    } catch (moveError: any) {
+      throw new PublishedPostMoveError(
+        `Post was published to X but failed while moving sheet rows. Internal ID: ${postObject.id}, Post ID: ${resultPostId}, Cause: ${moveError.message}`
+      );
+    }
   }
 }
 
