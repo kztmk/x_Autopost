@@ -70,6 +70,7 @@ export function initializeProxyAuth(requestData: InitializeRequest) {
   const setupCode = normalizeRequiredString(requestData.setupCode, "setupCode");
   const properties = PropertiesService.getScriptProperties();
   const allProps = properties.getProperties();
+  const currentOwnerUid = allProps[SECURITY_PROP_KEYS.ownerUid];
   const expectedHash = allProps[SECURITY_PROP_KEYS.setupCodeHash];
   const expiresAt = Number(
     allProps[SECURITY_PROP_KEYS.setupCodeExpiresAt] || "0"
@@ -88,6 +89,12 @@ export function initializeProxyAuth(requestData: InitializeRequest) {
     throw new Error("Invalid setup code.");
   }
 
+  if (currentOwnerUid && currentOwnerUid !== uid) {
+    throw new Error(
+      "This spreadsheet is already linked to another Torai account. Reinitialize it with the linked account, or create a separate GAS deployment for this account."
+    );
+  }
+
   const proxySecret = createProxySecret(uid, expectedHash);
   const initializedAt = new Date().toISOString();
 
@@ -100,7 +107,7 @@ export function initializeProxyAuth(requestData: InitializeRequest) {
 
   return {
     status: "initialized",
-    ownerUid: maskValue(uid),
+    ownerUid: uid,
     initializedAt,
     proxySecret,
     signatureAlgorithm: "HMAC_SHA256_BASE64_WEBSAFE",
