@@ -84,15 +84,15 @@ function postDiscordWebhook(webhookUrl: string, content: string): void {
 }
 
 function sendDiscordPostNotification(payload: PostNotificationPayload): void {
-  const properties = PropertiesService.getScriptProperties();
-  const enabled = properties.getProperty(DISCORD_NOTIFICATION_ENABLED_KEY) === "true";
-  const webhookUrl = properties.getProperty(DISCORD_WEBHOOK_URL_KEY);
-
-  if (!enabled || !webhookUrl) {
-    return;
-  }
-
   try {
+    const properties = PropertiesService.getScriptProperties();
+    const enabled = properties.getProperty(DISCORD_NOTIFICATION_ENABLED_KEY) === "true";
+    const webhookUrl = properties.getProperty(DISCORD_WEBHOOK_URL_KEY);
+
+    if (!enabled || !webhookUrl) {
+      return;
+    }
+
     postDiscordWebhook(webhookUrl, buildDiscordMessage(payload));
   } catch (error: any) {
     Logger.log(`Failed to send Discord notification: ${error.message || error}`);

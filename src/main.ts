@@ -54,7 +54,7 @@ function isProcessedPostId(value: any): boolean {
 }
 
 function formatScheduleForDiscord(value: any): string {
-  if (value instanceof Date) {
+  if (value instanceof Date && !isNaN(value.getTime())) {
     return formatDiscordDateTime(value);
   }
   if (typeof value === "string" && value.trim() !== "") {
