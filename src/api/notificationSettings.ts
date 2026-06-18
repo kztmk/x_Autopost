@@ -53,13 +53,16 @@ function upsertNotificationSettings(request: NotificationSettingsRequest): {
     };
   }
 
-  properties.setProperty(DISCORD_NOTIFICATION_ENABLED_KEY, "false");
+  const propertiesToSet: Record<string, string> = {
+    [DISCORD_NOTIFICATION_ENABLED_KEY]: "false",
+  };
   if (webhookUrl) {
     if (!isValidDiscordWebhookUrl(webhookUrl)) {
       throw new Error("Invalid Discord Webhook URL.");
     }
-    properties.setProperty(DISCORD_WEBHOOK_URL_KEY, webhookUrl);
+    propertiesToSet[DISCORD_WEBHOOK_URL_KEY] = webhookUrl;
   }
+  properties.setProperties(propertiesToSet);
 
   return {
     enabled: false,
