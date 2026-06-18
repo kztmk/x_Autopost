@@ -28,6 +28,18 @@ function formatOptionalLine(label: string, value?: string): string {
   return normalizedValue ? `${label}: ${normalizedValue}` : "";
 }
 
+function getScriptTimeZone(): string {
+  try {
+    return Session.getScriptTimeZone() || "Asia/Tokyo";
+  } catch (error) {
+    return "Asia/Tokyo";
+  }
+}
+
+function formatDiscordDateTime(date: Date): string {
+  return Utilities.formatDate(date, getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
+}
+
 function buildDiscordMessage(payload: PostNotificationPayload): string {
   const titleByStatus: Record<PostNotificationStatus, string> = {
     success: "X自動投稿が完了しました",
@@ -109,7 +121,7 @@ function sendDiscordTestNotification(webhookUrl?: string): {
     [
       "**虎威 Discord通知テスト**",
       "このメッセージが届いていれば、Webhook URLは正しく設定されています。",
-      `送信日時: ${new Date().toISOString()}`,
+      `送信日時: ${formatDiscordDateTime(new Date())}`,
     ].join("\n")
   );
 
@@ -119,5 +131,5 @@ function sendDiscordTestNotification(webhookUrl?: string): {
   };
 }
 
-export { sendDiscordPostNotification, sendDiscordTestNotification };
+export { formatDiscordDateTime, sendDiscordPostNotification, sendDiscordTestNotification };
 export type { PostNotificationPayload };

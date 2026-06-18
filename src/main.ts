@@ -5,7 +5,10 @@ import * as twitterApi from "./api/twitter"; // 追加: Twitter API関連のイ�
 import { HEADERS, SHEETS } from "./constants";
 import { HeaderMap, XAuthInfo } from "./types";
 import { logErrorToSheet, deleteTriggerByHandler } from "./utils";
-import { sendDiscordPostNotification } from "./api/discordNotification";
+import {
+  formatDiscordDateTime,
+  sendDiscordPostNotification,
+} from "./api/discordNotification";
 
 import * as apiv2 from "./apiv2";
 
@@ -48,6 +51,13 @@ function isUsableReplyPostId(value: any): boolean {
 function isProcessedPostId(value: any): boolean {
   const postId = normalizeSheetValue(value);
   return Boolean(postId && postId.toUpperCase() !== "ERROR");
+}
+
+function formatScheduleForDiscord(value: any): string {
+  if (value instanceof Date) {
+    return formatDiscordDateTime(value);
+  }
+  return normalizeSheetValue(value);
 }
 
 /**
@@ -322,7 +332,7 @@ async function autoPostToX() {
           internalId: normalizeSheetValue(postObject.id),
           postId: normalizeSheetValue(processResult.postId),
           content: normalizeSheetValue(postObject.contents),
-          scheduledAt: normalizeSheetValue(postObject.postSchedule),
+          scheduledAt: formatScheduleForDiscord(postObject.postSchedule),
         });
 
         processedInThisRun = true;
@@ -359,7 +369,7 @@ async function autoPostToX() {
             accountId: normalizeSheetValue(postObject?.postTo),
             internalId: normalizeSheetValue(internalPostId),
             content: normalizeSheetValue(postObject?.contents),
-            scheduledAt: normalizeSheetValue(postObject?.postSchedule),
+            scheduledAt: formatScheduleForDiscord(postObject?.postSchedule),
             errorMessage: e.message,
           });
           return;
@@ -380,7 +390,7 @@ async function autoPostToX() {
           accountId: normalizeSheetValue(postObject?.postTo),
           internalId: normalizeSheetValue(internalPostId),
           content: normalizeSheetValue(postObject?.contents),
-          scheduledAt: normalizeSheetValue(postObject?.postSchedule),
+          scheduledAt: formatScheduleForDiscord(postObject?.postSchedule),
           errorMessage: e.message,
         });
 
