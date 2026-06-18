@@ -22,11 +22,11 @@ function upsertNotificationSettings(request: NotificationSettingsRequest): {
   }
 
   const properties = PropertiesService.getScriptProperties();
+  const currentWebhookUrl = properties.getProperty(DISCORD_WEBHOOK_URL_KEY);
   const webhookUrl =
     typeof request.webhookUrl === "string" ? request.webhookUrl.trim() : "";
 
   if (request.enabled) {
-    const currentWebhookUrl = properties.getProperty(DISCORD_WEBHOOK_URL_KEY);
     if (!webhookUrl) {
       if (!currentWebhookUrl) {
         throw new Error("Discord Webhook URL is required when notification is enabled.");
@@ -66,7 +66,7 @@ function upsertNotificationSettings(request: NotificationSettingsRequest): {
 
   return {
     enabled: false,
-    hasWebhookUrl: Boolean(webhookUrl || properties.getProperty(DISCORD_WEBHOOK_URL_KEY)),
+    hasWebhookUrl: Boolean(webhookUrl || currentWebhookUrl),
   };
 }
 
