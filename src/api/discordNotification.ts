@@ -10,9 +10,9 @@ type PostNotificationPayload = {
   errorMessage?: string;
 };
 
-const DISCORD_NOTIFICATION_ENABLED_KEY = "discord_notification_enabled";
-const DISCORD_WEBHOOK_URL_KEY = "discord_webhook_url";
-const DISCORD_WEBHOOK_URL_PATTERN =
+export const DISCORD_NOTIFICATION_ENABLED_KEY = "discord_notification_enabled";
+export const DISCORD_WEBHOOK_URL_KEY = "discord_webhook_url";
+export const DISCORD_WEBHOOK_URL_PATTERN =
   /^https:\/\/(discord\.com|discordapp\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9._-]+$/;
 const DISCORD_MESSAGE_LIMIT = 1900;
 

@@ -1,12 +1,13 @@
+import {
+  DISCORD_NOTIFICATION_ENABLED_KEY,
+  DISCORD_WEBHOOK_URL_KEY,
+  DISCORD_WEBHOOK_URL_PATTERN,
+} from "./discordNotification";
+
 type NotificationSettingsRequest = {
   enabled: boolean;
   webhookUrl?: string;
 };
-
-const DISCORD_NOTIFICATION_ENABLED_KEY = "discord_notification_enabled";
-const DISCORD_WEBHOOK_URL_KEY = "discord_webhook_url";
-const DISCORD_WEBHOOK_URL_PATTERN =
-  /^https:\/\/(discord\.com|discordapp\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9._-]+$/;
 
 function isValidDiscordWebhookUrl(url: string): boolean {
   return DISCORD_WEBHOOK_URL_PATTERN.test(url);
@@ -53,11 +54,16 @@ function upsertNotificationSettings(request: NotificationSettingsRequest): {
   }
 
   properties.setProperty(DISCORD_NOTIFICATION_ENABLED_KEY, "false");
-  properties.deleteProperty(DISCORD_WEBHOOK_URL_KEY);
+  if (webhookUrl) {
+    if (!isValidDiscordWebhookUrl(webhookUrl)) {
+      throw new Error("Invalid Discord Webhook URL.");
+    }
+    properties.setProperty(DISCORD_WEBHOOK_URL_KEY, webhookUrl);
+  }
 
   return {
     enabled: false,
-    hasWebhookUrl: false,
+    hasWebhookUrl: Boolean(webhookUrl || properties.getProperty(DISCORD_WEBHOOK_URL_KEY)),
   };
 }
 

@@ -491,7 +491,7 @@ export function doPost(e) {
               response = upsertNotificationSettings(requestData);
               break;
             case "test":
-              response = sendDiscordTestNotification(requestData.webhookUrl);
+              response = sendDiscordTestNotification(requestData?.webhookUrl);
               break;
             default:
               statusCode = 400;
