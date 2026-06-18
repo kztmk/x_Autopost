@@ -31,6 +31,9 @@ function upsertNotificationSettings(request: NotificationSettingsRequest): {
       if (!currentWebhookUrl) {
         throw new Error("Discord Webhook URL is required when notification is enabled.");
       }
+      if (!isValidDiscordWebhookUrl(currentWebhookUrl)) {
+        throw new Error("Saved Discord Webhook URL is invalid.");
+      }
       properties.setProperty(DISCORD_NOTIFICATION_ENABLED_KEY, "true");
       return {
         enabled: true,
