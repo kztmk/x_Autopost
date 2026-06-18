@@ -5,6 +5,7 @@ import * as twitterApi from "./api/twitter"; // 追加: Twitter API関連のイ�
 import { HEADERS, SHEETS } from "./constants";
 import { HeaderMap, XAuthInfo } from "./types";
 import { logErrorToSheet, deleteTriggerByHandler } from "./utils";
+import { sendDiscordPostNotification } from "./api/discordNotification";
 
 import * as apiv2 from "./apiv2";
 
@@ -307,7 +308,7 @@ async function autoPostToX() {
         postObject = mapRowToObject(rowData, postsHeaderMap);
 
         // Process the post
-        await processPost(
+        const processResult = await processPost(
           postObject,
           rowIndex,
           postsSheet,
@@ -315,6 +316,14 @@ async function autoPostToX() {
           postsHeaderMap,
           postedHeaderMap
         );
+        sendDiscordPostNotification({
+          status: "success",
+          accountId: normalizeSheetValue(postObject.postTo),
+          internalId: normalizeSheetValue(postObject.id),
+          postId: normalizeSheetValue(processResult.postId),
+          content: normalizeSheetValue(postObject.contents),
+          scheduledAt: normalizeSheetValue(postObject.postSchedule),
+        });
 
         processedInThisRun = true;
       } catch (e: any) {
@@ -345,6 +354,14 @@ async function autoPostToX() {
           Logger.log(
             `Published post move failed for ${internalPostId}; row was not marked failed because the X post already exists.`
           );
+          sendDiscordPostNotification({
+            status: "critical",
+            accountId: normalizeSheetValue(postObject?.postTo),
+            internalId: normalizeSheetValue(internalPostId),
+            content: normalizeSheetValue(postObject?.contents),
+            scheduledAt: normalizeSheetValue(postObject?.postSchedule),
+            errorMessage: e.message,
+          });
           return;
         }
         logErrorToSheet(
@@ -358,6 +375,14 @@ async function autoPostToX() {
           },
           "Post Processing Error"
         );
+        sendDiscordPostNotification({
+          status: "error",
+          accountId: normalizeSheetValue(postObject?.postTo),
+          internalId: normalizeSheetValue(internalPostId),
+          content: normalizeSheetValue(postObject?.contents),
+          scheduledAt: normalizeSheetValue(postObject?.postSchedule),
+          errorMessage: e.message,
+        });
 
         // Update status to failed
         try {
@@ -433,6 +458,10 @@ async function autoPostToX() {
       },
       "Critical error"
     );
+    sendDiscordPostNotification({
+      status: "critical",
+      errorMessage: e.message,
+    });
   }
 }
 
@@ -791,7 +820,7 @@ async function processPost(
   postedSheet: GoogleAppsScript.Spreadsheet.Sheet,
   postsHeaderMap: HeaderMap,
   postedHeaderMap: HeaderMap
-): Promise<void> {
+): Promise<{ postId: string | null }> {
   // 認証情報の取得
   const authInfo = await auth.getXAuthById(postObject.postTo);
   if (!authInfo) {
@@ -929,6 +958,8 @@ async function processPost(
       );
     }
   }
+
+  return { postId: resultPostId };
 }
 
 // Export functions that should be accessible from other modules or via API endpoints

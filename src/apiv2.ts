@@ -22,6 +22,8 @@ import {
   deleteAllTriggers,
 } from "./api/triggers";
 import { archiveSheet } from "./api/archive";
+import { upsertNotificationSettings } from "./api/notificationSettings";
+import { sendDiscordTestNotification } from "./api/discordNotification";
 import {
   assertProxyAuthorized,
   generateSetupCode,
@@ -480,6 +482,22 @@ export function doPost(e) {
             default:
               statusCode = 400; // Bad Request
               throw new Error(`Invalid target '${target}'`);
+          }
+          break;
+
+        case "notificationSettings":
+          switch (action) {
+            case "upsert":
+              response = upsertNotificationSettings(requestData);
+              break;
+            case "test":
+              response = sendDiscordTestNotification(requestData.webhookUrl);
+              break;
+            default:
+              statusCode = 400;
+              throw new Error(
+                `Invalid action '${action}' for target 'notificationSettings'`
+              );
           }
           break;
 
