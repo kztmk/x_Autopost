@@ -57,6 +57,12 @@ function formatScheduleForDiscord(value: any): string {
   if (value instanceof Date) {
     return formatDiscordDateTime(value);
   }
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsedDate = new Date(value);
+    if (!isNaN(parsedDate.getTime())) {
+      return formatDiscordDateTime(parsedDate);
+    }
+  }
   return normalizeSheetValue(value);
 }
 
