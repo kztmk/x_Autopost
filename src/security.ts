@@ -70,6 +70,7 @@ export function initializeProxyAuth(requestData: InitializeRequest) {
   const setupCode = normalizeRequiredString(requestData.setupCode, "setupCode");
   const properties = PropertiesService.getScriptProperties();
   const allProps = properties.getProperties();
+  const existingOwnerUid = allProps[SECURITY_PROP_KEYS.ownerUid];
   const expectedHash = allProps[SECURITY_PROP_KEYS.setupCodeHash];
   const expiresAt = Number(
     allProps[SECURITY_PROP_KEYS.setupCodeExpiresAt] || "0"
@@ -86,6 +87,10 @@ export function initializeProxyAuth(requestData: InitializeRequest) {
 
   if (sha256Base64(setupCode) !== expectedHash) {
     throw new Error("Invalid setup code.");
+  }
+
+  if (existingOwnerUid && existingOwnerUid !== uid) {
+    throw new Error("Firebase UID is not authorized for this spreadsheet.");
   }
 
   const proxySecret = createProxySecret(uid, expectedHash);
