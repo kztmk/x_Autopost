@@ -6,6 +6,7 @@ const SECURITY_PROP_KEYS = {
   setupCodeExpiresAt: "security_setupCodeExpiresAt",
 } as const;
 
+const SECURITY_STATE_SHEET_NAME = "_torai_security_state";
 const SETUP_CODE_TTL_MS = 10 * 60 * 1000;
 const REQUEST_TOLERANCE_MS = 5 * 60 * 1000;
 const REPLAY_CACHE_TTL_SECONDS = 5 * 60;
@@ -33,11 +34,13 @@ export function generateSetupCode(): string {
   const code = createRandomCode();
   const expiresAt = Date.now() + SETUP_CODE_TTL_MS;
   const properties = PropertiesService.getScriptProperties();
+  const setupCodeHash = sha256Base64(code);
 
   properties.setProperties({
-    [SECURITY_PROP_KEYS.setupCodeHash]: sha256Base64(code),
+    [SECURITY_PROP_KEYS.setupCodeHash]: setupCodeHash,
     [SECURITY_PROP_KEYS.setupCodeExpiresAt]: String(expiresAt),
   });
+  saveSetupCodeStateToSheet(setupCodeHash, expiresAt);
 
   Logger.log(
     `Setup code generated. It expires at ${new Date(expiresAt).toISOString()}.`
@@ -50,7 +53,8 @@ export function getSecurityStatus() {
   const allProps = properties.getProperties();
   const ownerUid = allProps[SECURITY_PROP_KEYS.ownerUid];
   const initializedAt = allProps[SECURITY_PROP_KEYS.initializedAt];
-  const setupCodeExpiresAt = allProps[SECURITY_PROP_KEYS.setupCodeExpiresAt];
+  const setupState = getSetupCodeState(allProps);
+  const setupCodeExpiresAt = setupState.setupCodeExpiresAt;
 
   return {
     initialized: Boolean(ownerUid),
@@ -71,13 +75,21 @@ export function initializeProxyAuth(requestData: InitializeRequest) {
   const properties = PropertiesService.getScriptProperties();
   const allProps = properties.getProperties();
   const existingOwnerUid = allProps[SECURITY_PROP_KEYS.ownerUid];
-  const expectedHash = allProps[SECURITY_PROP_KEYS.setupCodeHash];
-  const expiresAt = Number(
-    allProps[SECURITY_PROP_KEYS.setupCodeExpiresAt] || "0"
-  );
+  const setupState = getSetupCodeState(allProps);
+  const expectedHash = setupState.setupCodeHash;
+  const expiresAt = Number(setupState.setupCodeExpiresAt || "0");
+
+  if (setupState.source === "sheet") {
+    properties.setProperties({
+      [SECURITY_PROP_KEYS.setupCodeHash]: expectedHash,
+      [SECURITY_PROP_KEYS.setupCodeExpiresAt]: String(expiresAt),
+    });
+  }
 
   if (!expectedHash || !expiresAt) {
-    throw new Error("Setup code has not been generated.");
+    throw new Error(
+      "Setup code has not been generated. Generate a new setup code from the Spreadsheet menu, then save it in Torai before it expires."
+    );
   }
 
   if (Date.now() > expiresAt) {
@@ -112,6 +124,118 @@ export function initializeProxyAuth(requestData: InitializeRequest) {
     signaturePayload:
       "timestamp.uid.action.target.stableJsonPayloadWithoutAuth",
   };
+}
+
+function getSetupCodeState(allProps: { [key: string]: string }) {
+  const scriptSetupCodeHash = allProps[SECURITY_PROP_KEYS.setupCodeHash] || "";
+  const scriptSetupCodeExpiresAt =
+    allProps[SECURITY_PROP_KEYS.setupCodeExpiresAt] || "";
+
+  if (scriptSetupCodeHash && scriptSetupCodeExpiresAt) {
+    return {
+      setupCodeHash: scriptSetupCodeHash,
+      setupCodeExpiresAt: scriptSetupCodeExpiresAt,
+      source: "scriptProperties",
+    };
+  }
+
+  const sheetState = loadSetupCodeStateFromSheet();
+  if (sheetState.setupCodeHash && sheetState.setupCodeExpiresAt) {
+    return {
+      ...sheetState,
+      source: "sheet",
+    };
+  }
+
+  return {
+    setupCodeHash: "",
+    setupCodeExpiresAt: "",
+    source: "none",
+  };
+}
+
+function saveSetupCodeStateToSheet(setupCodeHash: string, expiresAt: number): void {
+  try {
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    if (!spreadsheet) {
+      Logger.log("Setup code sheet fallback skipped: active spreadsheet not found.");
+      return;
+    }
+
+    const sheet = getOrCreateSecurityStateSheet(spreadsheet);
+    sheet.getRange(1, 1, 3, 2).setValues([
+      ["key", "value"],
+      [SECURITY_PROP_KEYS.setupCodeHash, setupCodeHash],
+      [SECURITY_PROP_KEYS.setupCodeExpiresAt, String(expiresAt)],
+    ]);
+  } catch (error: any) {
+    Logger.log(`Setup code sheet fallback save failed: ${error.message}`);
+  }
+}
+
+function loadSetupCodeStateFromSheet(): {
+  setupCodeHash: string;
+  setupCodeExpiresAt: string;
+} {
+  try {
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    if (!spreadsheet) {
+      Logger.log("Setup code sheet fallback load skipped: active spreadsheet not found.");
+      return { setupCodeHash: "", setupCodeExpiresAt: "" };
+    }
+
+    const sheet = spreadsheet.getSheetByName(SECURITY_STATE_SHEET_NAME);
+    if (!sheet) {
+      return { setupCodeHash: "", setupCodeExpiresAt: "" };
+    }
+
+    const values = sheet.getDataRange().getValues();
+    const state: { [key: string]: string } = {};
+    values.slice(1).forEach((row) => {
+      const key = String(row[0] || "");
+      if (key) {
+        state[key] = String(row[1] || "");
+      }
+    });
+
+    return {
+      setupCodeHash: state[SECURITY_PROP_KEYS.setupCodeHash] || "",
+      setupCodeExpiresAt: state[SECURITY_PROP_KEYS.setupCodeExpiresAt] || "",
+    };
+  } catch (error: any) {
+    Logger.log(`Setup code sheet fallback load failed: ${error.message}`);
+    return { setupCodeHash: "", setupCodeExpiresAt: "" };
+  }
+}
+
+function clearSetupCodeStateSheet(): void {
+  try {
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = spreadsheet?.getSheetByName(SECURITY_STATE_SHEET_NAME);
+    if (sheet) {
+      sheet.clear();
+      hideSheetIfVisible(sheet);
+    }
+  } catch (error: any) {
+    Logger.log(`Setup code sheet fallback clear failed: ${error.message}`);
+  }
+}
+
+function getOrCreateSecurityStateSheet(
+  spreadsheet: GoogleAppsScript.Spreadsheet.Spreadsheet
+): GoogleAppsScript.Spreadsheet.Sheet {
+  let sheet = spreadsheet.getSheetByName(SECURITY_STATE_SHEET_NAME);
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet(SECURITY_STATE_SHEET_NAME);
+  }
+  hideSheetIfVisible(sheet);
+  return sheet;
+}
+
+function hideSheetIfVisible(sheet: GoogleAppsScript.Spreadsheet.Sheet): void {
+  if (!sheet.isSheetHidden()) {
+    sheet.hideSheet();
+  }
 }
 
 export function assertProxyAuthorized(
@@ -394,6 +518,7 @@ function clearSetupCode(
 ): void {
   properties.deleteProperty(SECURITY_PROP_KEYS.setupCodeHash);
   properties.deleteProperty(SECURITY_PROP_KEYS.setupCodeExpiresAt);
+  clearSetupCodeStateSheet();
 }
 
 function maskValue(value: string): string {
