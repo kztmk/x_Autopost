@@ -214,7 +214,7 @@ function clearSetupCodeStateSheet(): void {
     const sheet = spreadsheet?.getSheetByName(SECURITY_STATE_SHEET_NAME);
     if (sheet) {
       sheet.clear();
-      sheet.hideSheet();
+      hideSheetIfVisible(sheet);
     }
   } catch (error: any) {
     Logger.log(`Setup code sheet fallback clear failed: ${error.message}`);
@@ -228,8 +228,14 @@ function getOrCreateSecurityStateSheet(
   if (!sheet) {
     sheet = spreadsheet.insertSheet(SECURITY_STATE_SHEET_NAME);
   }
-  sheet.hideSheet();
+  hideSheetIfVisible(sheet);
   return sheet;
+}
+
+function hideSheetIfVisible(sheet: GoogleAppsScript.Spreadsheet.Sheet): void {
+  if (!sheet.isSheetHidden()) {
+    sheet.hideSheet();
+  }
 }
 
 export function assertProxyAuthorized(
