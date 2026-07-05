@@ -250,7 +250,13 @@ function getOrCreateSecurityStateSheet(
 
 function hideSheetIfVisible(sheet: GoogleAppsScript.Spreadsheet.Sheet): void {
   if (!sheet.isSheetHidden()) {
-    sheet.hideSheet();
+    const visibleSheets = sheet
+      .getParent()
+      .getSheets()
+      .filter((spreadsheetSheet) => !spreadsheetSheet.isSheetHidden());
+    if (visibleSheets.length > 1) {
+      sheet.hideSheet();
+    }
   }
 }
 
