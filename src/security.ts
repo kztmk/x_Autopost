@@ -224,12 +224,28 @@ function clearSetupCodeStateSheet(): void {
 function getOrCreateSecurityStateSheet(
   spreadsheet: GoogleAppsScript.Spreadsheet.Spreadsheet
 ): GoogleAppsScript.Spreadsheet.Sheet {
-  let sheet = spreadsheet.getSheetByName(SECURITY_STATE_SHEET_NAME);
-  if (!sheet) {
-    sheet = spreadsheet.insertSheet(SECURITY_STATE_SHEET_NAME);
+  const lock = LockService.getScriptLock();
+  let lockAcquired = false;
+  try {
+    lock.waitLock(10000);
+    lockAcquired = true;
+  } catch (lockError) {
+    Logger.log(`Could not acquire lock for security state sheet: ${lockError}`);
+    throw lockError;
   }
-  hideSheetIfVisible(sheet);
-  return sheet;
+
+  try {
+    let sheet = spreadsheet.getSheetByName(SECURITY_STATE_SHEET_NAME);
+    if (!sheet) {
+      sheet = spreadsheet.insertSheet(SECURITY_STATE_SHEET_NAME);
+    }
+    hideSheetIfVisible(sheet);
+    return sheet;
+  } finally {
+    if (lockAcquired) {
+      lock.releaseLock();
+    }
+  }
 }
 
 function hideSheetIfVisible(sheet: GoogleAppsScript.Spreadsheet.Sheet): void {

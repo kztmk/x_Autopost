@@ -19,6 +19,7 @@ export const DISCORD_WEBHOOK_URL_PATTERN =
 const DISCORD_MESSAGE_LIMIT = 1900;
 const DISCORD_LOG_SHEET_NAME = "discord_log";
 const DISCORD_LOG_MAX_ROWS = 500;
+const DISCORD_LOG_DELETE_BATCH_SIZE = 50;
 const DISCORD_LOG_HEADERS = [
   "timestamp",
   "eventType",
@@ -80,6 +81,16 @@ function getDiscordResponseCode(error: any): number | undefined {
 }
 
 function appendDiscordNotificationLog(entry: DiscordNotificationLogEntry): void {
+  const lock = LockService.getScriptLock();
+  let lockAcquired = false;
+  try {
+    lock.waitLock(15000);
+    lockAcquired = true;
+  } catch (lockError) {
+    Logger.log(`Could not acquire lock for Discord logging: ${lockError}`);
+    return;
+  }
+
   try {
     const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
     if (!spreadsheet) {
@@ -108,11 +119,15 @@ function appendDiscordNotificationLog(entry: DiscordNotificationLogEntry): void 
     ]);
 
     const dataRowCount = sheet.getLastRow() - 1;
-    if (dataRowCount > DISCORD_LOG_MAX_ROWS) {
+    if (dataRowCount > DISCORD_LOG_MAX_ROWS + DISCORD_LOG_DELETE_BATCH_SIZE) {
       sheet.deleteRows(2, dataRowCount - DISCORD_LOG_MAX_ROWS);
     }
   } catch (logError: any) {
     Logger.log(`Discord notification sheet log failed: ${logError.message || logError}`);
+  } finally {
+    if (lockAcquired) {
+      lock.releaseLock();
+    }
   }
 }
 
