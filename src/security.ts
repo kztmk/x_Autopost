@@ -102,7 +102,7 @@ export function initializeProxyAuth(requestData: InitializeRequest) {
   }
 
   if (existingOwnerUid && existingOwnerUid !== uid) {
-    throw new Error("Firebase UID is not authorized for this spreadsheet.");
+    throw new Error("このシートは他の方が登録されており使用できません。");
   }
 
   const proxySecret = createProxySecret(uid, expectedHash);
@@ -267,7 +267,7 @@ export function assertProxyAuthorized(
   const timestamp = Number(timestampRaw);
 
   if (uid !== ownerUid) {
-    throw new Error("Firebase UID is not authorized for this spreadsheet.");
+    throw new Error("このシートは他の方が登録されており使用できません。");
   }
 
   if (!Number.isFinite(timestamp)) {
