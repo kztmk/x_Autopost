@@ -107,7 +107,28 @@ function monthlyUsage() {
   const target = getSheet(RUNS_SHEET, ["timestamp", "month", "accountId", "resources", "estimatedCostUsd", "status", "message"]);
   const byAccount: Record<string, number> = {}; let resources = 0;
   let costUsd = 0;
-  if (target.getLastRow() >= 2) target.getRange(2, 1, target.getLastRow() - 1, 7).getValues().filter((r) => String(r[1]) === monthKey()).forEach((r) => { const count = Number(r[3]) || 0; const cost = Number(r[4]) || 0; resources += count; costUsd += cost; byAccount[String(r[2])] = (byAccount[String(r[2])] || 0) + cost; });
+  const lastRow = target.getLastRow();
+  if (lastRow < 2) return { resources, costUsd, byAccount };
+  const currentMonth = monthKey();
+  const matches = target.getRange(2, 2, lastRow - 1, 1)
+    .createTextFinder(currentMonth)
+    .matchEntireCell(true)
+    .useRegularExpression(false)
+    .findAll();
+  if (!matches.length) return { resources, costUsd, byAccount };
+  const matchingRows = matches.map((match) => match.getRow());
+  const firstMatchingRow = Math.min(...matchingRows);
+  const lastMatchingRow = Math.max(...matchingRows);
+  const rows = target.getRange(firstMatchingRow, 1, lastMatchingRow - firstMatchingRow + 1, 7).getValues();
+  for (const row of rows) {
+    if (String(row[1]) !== currentMonth) continue;
+    const count = Number(row[3]) || 0;
+    const cost = Number(row[4]) || 0;
+    const accountId = String(row[2]);
+    resources += count;
+    costUsd += cost;
+    byAccount[accountId] = (byAccount[accountId] || 0) + cost;
+  }
   return { resources, costUsd, byAccount };
 }
 
@@ -273,10 +294,13 @@ export function updateXMarketingProspect(input: any) {
     const rowCount = targetSheet.getLastRow() - 1;
     if (rowCount < 1) throw new Error("X_MARKETING_INTERACTION_NOT_FOUND");
     const interactionIdColumn = HEADERS.indexOf("interactionId") + 1;
-    const rowOffset = targetSheet.getRange(2, interactionIdColumn, rowCount, 1).getValues()
-      .findIndex((row) => String(row[0]) === String(input.interactionId));
-    if (rowOffset < 0) throw new Error("X_MARKETING_INTERACTION_NOT_FOUND");
-    const sheetRow = rowOffset + 2;
+    const matchingCell = targetSheet.getRange(2, interactionIdColumn, rowCount, 1)
+      .createTextFinder(String(input.interactionId))
+      .matchEntireCell(true)
+      .useRegularExpression(false)
+      .findNext();
+    if (!matchingCell) throw new Error("X_MARKETING_INTERACTION_NOT_FOUND");
+    const sheetRow = matchingCell.getRow();
     const rowValues = targetSheet.getRange(sheetRow, 1, 1, HEADERS.length).getValues()[0];
     const target = Object.fromEntries(HEADERS.map((header, index) => [header, rowValues[index]]));
     if (["new", "interested", "conversation", "completed"].includes(input.stage)) target.stage = input.stage;
