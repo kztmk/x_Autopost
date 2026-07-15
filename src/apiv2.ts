@@ -24,6 +24,7 @@ import {
 import { archiveSheet } from "./api/archive";
 import { upsertNotificationSettings } from "./api/notificationSettings";
 import { sendDiscordTestNotification } from "./api/discordNotification";
+import { getXMarketingDashboard, refreshXMarketingDaily, updateXMarketingProspect, upsertXMarketingSettings } from "./api/xMarketing";
 import {
   assertProxyAuthorized,
   generateSetupCode,
@@ -501,6 +502,15 @@ export function doPost(e) {
           }
           break;
 
+        case "xMarketing":
+          switch (action) {
+            case "upsertSettings": response = upsertXMarketingSettings(requestData); break;
+            case "refresh": response = refreshXMarketingDaily(); break;
+            case "updateProspect": response = updateXMarketingProspect(requestData); break;
+            default: statusCode = 400; throw new Error(`Invalid action '${action}' for target 'xMarketing'`);
+          }
+          break;
+
         default:
           statusCode = 400; // Bad Request
           throw new Error(`Invalid target '${target}'`);
@@ -666,6 +676,11 @@ export function doGet(e) {
               `Invalid action '${action}' for target 'trigger' in GET request`
             );
         }
+        break;
+
+      case "xMarketing":
+        if (action === "fetch") response = getXMarketingDashboard(e.parameter);
+        else { statusCode = 400; throw new Error(`Invalid action '${action}' for target 'xMarketing' in GET request`); }
         break;
 
       default:
