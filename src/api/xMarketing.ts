@@ -186,18 +186,18 @@ function mergeFetchedInteractions(existingRows: any[], fetched: FetchedInteracti
   for (const interaction of fetched) {
     const previous = merged.get(interaction.interactionId);
     const isLike = interaction.reactionType === "like";
-    const previousLikeCount = normalizeCount(previous?.likeCount, 0);
-    const previousReplyCount = normalizeCount(previous?.replyCount, 0);
+    const likeCount = normalizeCount(previous?.likeCount, isLike ? 1 : 0);
+    const replyCount = normalizeCount(previous?.replyCount, isLike ? 0 : 1);
     merged.set(interaction.interactionId, {
       ...previous,
       ...interaction,
       score: isLike
-        ? Math.min(100, 42 + previousLikeCount * 2)
-        : Math.min(100, 72 + previousReplyCount * 5),
+        ? Math.min(100, 42 + likeCount * 2)
+        : Math.min(100, 72 + replyCount * 5),
       stage: previous?.stage || "new",
       status: previous?.status || "unread",
-      likeCount: normalizeCount(previous?.likeCount, isLike ? 1 : 0),
-      replyCount: normalizeCount(previous?.replyCount, isLike ? 0 : 1),
+      likeCount,
+      replyCount,
       quoteCount: normalizeCount(previous?.quoteCount, 0),
       repostCount: normalizeCount(previous?.repostCount, 0),
       tags: previous?.tags || "",
