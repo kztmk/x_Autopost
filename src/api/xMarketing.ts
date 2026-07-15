@@ -175,23 +175,31 @@ function fetchAccount(accountId: string, settings: MarketingSettings): AccountFe
   return { accountId, interactions, resources, costUsd, partialErrors };
 }
 
+function normalizeCount(value: any, fallback: number) {
+  if (value === "" || value === null || value === undefined) return fallback;
+  const count = Number(value);
+  return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : fallback;
+}
+
 function mergeFetchedInteractions(existingRows: any[], fetched: FetchedInteraction[]) {
   const merged = new Map(existingRows.map((row) => [String(row.interactionId), row]));
   for (const interaction of fetched) {
     const previous = merged.get(interaction.interactionId);
     const isLike = interaction.reactionType === "like";
+    const previousLikeCount = normalizeCount(previous?.likeCount, 0);
+    const previousReplyCount = normalizeCount(previous?.replyCount, 0);
     merged.set(interaction.interactionId, {
       ...previous,
       ...interaction,
       score: isLike
-        ? Math.min(100, 42 + Number(previous?.likeCount || 0) * 2)
-        : Math.min(100, 72 + Number(previous?.replyCount || 0) * 5),
+        ? Math.min(100, 42 + previousLikeCount * 2)
+        : Math.min(100, 72 + previousReplyCount * 5),
       stage: previous?.stage || "new",
       status: previous?.status || "unread",
-      likeCount: previous?.likeCount ?? (isLike ? 1 : 0),
-      replyCount: previous?.replyCount ?? (isLike ? 0 : 1),
-      quoteCount: previous?.quoteCount ?? 0,
-      repostCount: previous?.repostCount ?? 0,
+      likeCount: normalizeCount(previous?.likeCount, isLike ? 1 : 0),
+      replyCount: normalizeCount(previous?.replyCount, isLike ? 0 : 1),
+      quoteCount: normalizeCount(previous?.quoteCount, 0),
+      repostCount: normalizeCount(previous?.repostCount, 0),
       tags: previous?.tags || "",
       memo: previous?.memo || "",
       updatedAt: new Date().toISOString(),
@@ -277,12 +285,25 @@ function serializeDate(value: any) {
 function publicInteraction(row: any) { return { id: String(row.interactionId || ""), accountId: String(row.accountId || ""), userId: String(row.userId || ""), username: String(row.username || ""), name: String(row.name || ""), reactionType: String(row.reactionType || ""), postId: String(row.postId || ""), postText: String(row.postText || ""), occurredAt: serializeDate(row.occurredAt), score: Number(row.score) || 0, stage: String(row.stage || "new"), status: String(row.status || "unread"), counts: { likes: Number(row.likeCount) || 0, replies: Number(row.replyCount) || 0, quotes: Number(row.quoteCount) || 0, reposts: Number(row.repostCount) || 0 }, tags: String(row.tags || "").split(",").map((v) => v.trim()).filter(Boolean), memo: String(row.memo || "") }; }
 
 export function getXMarketingDashboard(params: any = {}) {
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(5000)) throw new Error("X_MARKETING_READ_LOCK_TIMEOUT");
-  try {
-    const accountId = String(params.accountId || "all"); const usage = monthlyUsage(); const settings = getSettings();
-    return { settings, accounts: getXAuthAll().map((a) => ({ accountId: a.accountId, estimatedCostUsd: usage.byAccount[a.accountId] || 0 })), globalCost: { estimatedUsd: usage.costUsd, limitUsd: settings.monthlyLimitUsd, resources: usage.resources }, interactions: readRows().filter((r) => accountId === "all" || String(r.accountId) === accountId).map(publicInteraction), lastSyncedAt: new Date().toISOString() };
-  } finally { lock.releaseLock(); }
+  const accountId = String(params.accountId || "all");
+  const usage = monthlyUsage();
+  const settings = getSettings();
+  return {
+    settings,
+    accounts: getXAuthAll().map((account) => ({
+      accountId: account.accountId,
+      estimatedCostUsd: usage.byAccount[account.accountId] || 0,
+    })),
+    globalCost: {
+      estimatedUsd: usage.costUsd,
+      limitUsd: settings.monthlyLimitUsd,
+      resources: usage.resources,
+    },
+    interactions: readRows()
+      .filter((row) => accountId === "all" || String(row.accountId) === accountId)
+      .map(publicInteraction),
+    lastSyncedAt: new Date().toISOString(),
+  };
 }
 
 export function updateXMarketingProspect(input: any) {
