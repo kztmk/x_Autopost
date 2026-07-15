@@ -137,14 +137,16 @@ function fetchAccount(accountId: string, settings: MarketingSettings): AccountFe
   const authInfo = auth.getXAuthById(accountId);
   const me = signedGet(authInfo, "https://api.x.com/2/users/me", { "user.fields": "name,username" });
   const userId = String(me?.data?.id || ""); if (!userId) throw new Error("X_MARKETING_AUTH_FAILED");
-  const tweets = signedGet(authInfo, `https://api.x.com/2/users/${userId}/tweets`, { max_results: String(Math.max(5, settings.maxPostsPerAccount)), start_time: new Date(Date.now() - settings.trackingDays * 86400000).toISOString(), exclude: "retweets", "tweet.fields": "created_at,public_metrics" });
+  const maxPostsPerAccount = Math.max(1, Math.min(100, normalizeCount(settings.maxPostsPerAccount, 1)));
+  const timelineMaxResults = Math.max(5, maxPostsPerAccount);
+  const tweets = signedGet(authInfo, `https://api.x.com/2/users/${userId}/tweets`, { max_results: String(timelineMaxResults), start_time: new Date(Date.now() - settings.trackingDays * 86400000).toISOString(), exclude: "retweets", "tweet.fields": "created_at,public_metrics" });
   const interactions: FetchedInteraction[] = [];
   const partialErrors: string[] = [];
   const tweetData = Array.isArray(tweets?.data) ? tweets.data : [];
   let postReads = tweetData.length;
   let userReads = 1;
-  const likingUsersLimit = Math.max(1, Math.min(100, Number(settings.maxLikingUsersPerPost) || 1));
-  for (const post of tweetData.filter((post: any) => post?.id).slice(0, settings.maxPostsPerAccount)) {
+  const likingUsersLimit = Math.max(1, Math.min(100, normalizeCount(settings.maxLikingUsersPerPost, 1)));
+  for (const post of tweetData.filter((post: any) => post?.id).slice(0, maxPostsPerAccount)) {
     try {
       const likes = signedGet(authInfo, `https://api.x.com/2/tweets/${post.id}/liking_users`, { max_results: String(likingUsersLimit), "user.fields": "name,username" });
       const likeData = Array.isArray(likes?.data) ? likes.data : [];
@@ -159,7 +161,7 @@ function fetchAccount(accountId: string, settings: MarketingSettings): AccountFe
     }
   }
   try {
-    const mentions = signedGet(authInfo, `https://api.x.com/2/users/${userId}/mentions`, { max_results: String(Math.max(5, settings.maxPostsPerAccount)), start_time: new Date(Date.now() - settings.trackingDays * 86400000).toISOString(), expansions: "author_id", "tweet.fields": "author_id,created_at", "user.fields": "name,username" });
+    const mentions = signedGet(authInfo, `https://api.x.com/2/users/${userId}/mentions`, { max_results: String(timelineMaxResults), start_time: new Date(Date.now() - settings.trackingDays * 86400000).toISOString(), expansions: "author_id", "tweet.fields": "author_id,created_at", "user.fields": "name,username" });
     const mentionData = Array.isArray(mentions?.data) ? mentions.data : [];
     const includedUsers = Array.isArray(mentions?.includes?.users) ? mentions.includes.users : [];
     const mentionUsers = new Map<string, any>(includedUsers
