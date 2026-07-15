@@ -5,11 +5,16 @@ import { getXAuthAll } from "./xauth";
 const INTERACTIONS_SHEET = "XMarketingInteractions";
 const RUNS_SHEET = "XMarketingRuns";
 const SETTINGS_KEY = "x_marketing_settings";
+const REFRESH_LEASE_KEY = "x_marketing_refresh_lease";
+const REFRESH_LEASE_TTL_MS = 15 * 60 * 1000;
 const OWNED_POST_READ_USD = 0.001;
 const USER_READ_USD = 0.01;
 const HEADERS = ["interactionId", "accountId", "userId", "username", "name", "reactionType", "postId", "postText", "occurredAt", "score", "stage", "status", "likeCount", "replyCount", "quoteCount", "repostCount", "tags", "memo", "updatedAt"];
 type Query = Record<string, string>;
 type MarketingSettings = { enabled: boolean; trackingDays: number; maxPostsPerAccount: number; maxLikingUsersPerPost: number; monthlyLimitUsd: number };
+type FetchedInteraction = { interactionId: string; accountId: string; userId: string; username: string; name: string; reactionType: "like" | "reply"; postId: string; postText: string; occurredAt: string };
+type AccountFetchResult = { accountId: string; interactions: FetchedInteraction[]; resources: number; costUsd: number; partialErrors: string[] };
+type RunEntry = { accountId: string; resources: number; costUsd: number; status: string; message?: string };
 const defaults: MarketingSettings = { enabled: false, trackingDays: 7, maxPostsPerAccount: 10, maxLikingUsersPerPost: 25, monthlyLimitUsd: 25 };
 
 function getSettings(): MarketingSettings {
@@ -62,26 +67,28 @@ function signedGet(authInfo: XAuthInfo, endpoint: string, query: Query = {}): an
 function readRows(): any[] {
   const target = getSheet(INTERACTIONS_SHEET, HEADERS);
   if (target.getLastRow() < 2) return [];
-  return target.getRange(2, 1, target.getLastRow() - 1, HEADERS.length).getValues().map((row) => Object.fromEntries(HEADERS.map((h, i) => [h, row[i]])));
+  return target.getRange(2, 1, target.getLastRow() - 1, HEADERS.length).getValues()
+    .map((row) => Object.fromEntries(HEADERS.map((h, i) => [h, row[i]])))
+    .filter((row) => String(row.interactionId || "").trim());
 }
 
-function upsertRows(incoming: any[], replaceAll = false, existingRows?: any[]) {
+function replaceRows(source: any[]) {
   const target = getSheet(INTERACTIONS_SHEET, HEADERS);
-  let source = incoming;
-  if (!replaceAll) {
-    const merged = new Map((existingRows || readRows()).map((row) => [String(row.interactionId), row]));
-    incoming.forEach((row) => merged.set(String(row.interactionId), { ...merged.get(String(row.interactionId)), ...row }));
-    source = Array.from(merged.values());
-  }
   const rows = source.map((row) => HEADERS.map((h) => row[h] ?? ""));
   if (target.getLastRow() > 1) target.getRange(2, 1, target.getLastRow() - 1, HEADERS.length).clearContent();
   if (rows.length) target.getRange(2, 1, rows.length, HEADERS.length).setValues(rows);
 }
 
 function monthKey(date = new Date()) { return Utilities.formatDate(date, "UTC", "yyyy-MM"); }
-function appendRun(accountId: string, resources: number, estimatedCostUsd: number, status: string, message = "") {
+function appendRuns(entries: RunEntry[]) {
+  if (!entries.length) return;
   const headers = ["timestamp", "month", "accountId", "resources", "estimatedCostUsd", "status", "message"];
-  getSheet(RUNS_SHEET, headers).appendRow([new Date(), monthKey(), accountId, resources, estimatedCostUsd, status, message]);
+  const target = getSheet(RUNS_SHEET, headers);
+  const timestamp = new Date();
+  const month = monthKey(timestamp);
+  target.getRange(target.getLastRow() + 1, 1, entries.length, headers.length).setValues(
+    entries.map((entry) => [timestamp, month, entry.accountId, entry.resources, entry.costUsd, entry.status, entry.message || ""])
+  );
 }
 function monthlyUsage() {
   const target = getSheet(RUNS_SHEET, ["timestamp", "month", "accountId", "resources", "estimatedCostUsd", "status", "message"]);
@@ -91,22 +98,22 @@ function monthlyUsage() {
   return { resources, costUsd, byAccount };
 }
 
-function refreshAccount(accountId: string, settings: MarketingSettings): { resources: number; costUsd: number } {
+function fetchAccount(accountId: string, settings: MarketingSettings): AccountFetchResult {
   const authInfo = auth.getXAuthById(accountId);
   const me = signedGet(authInfo, "https://api.x.com/2/users/me", { "user.fields": "name,username" });
   const userId = String(me?.data?.id || ""); if (!userId) throw new Error("X_MARKETING_AUTH_FAILED");
   const tweets = signedGet(authInfo, `https://api.x.com/2/users/${userId}/tweets`, { max_results: String(Math.max(5, settings.maxPostsPerAccount)), start_time: new Date(Date.now() - settings.trackingDays * 86400000).toISOString(), exclude: "retweets", "tweet.fields": "created_at,public_metrics" });
-  const current = readRows(); const currentMap = new Map(current.map((row) => [String(row.interactionId), row])); const incoming: any[] = [];
+  const interactions: FetchedInteraction[] = [];
   const partialErrors: string[] = [];
   let postReads = Array.isArray(tweets.data) ? tweets.data.length : 0;
   let userReads = 1;
+  const likingUsersLimit = Math.max(1, Math.min(100, Number(settings.maxLikingUsersPerPost) || 1));
   for (const post of (tweets.data || []).slice(0, settings.maxPostsPerAccount)) {
     try {
-      const likes = signedGet(authInfo, `https://api.x.com/2/tweets/${post.id}/liking_users`, { max_results: String(settings.maxLikingUsersPerPost), "user.fields": "name,username" });
+      const likes = signedGet(authInfo, `https://api.x.com/2/tweets/${post.id}/liking_users`, { max_results: String(likingUsersLimit), "user.fields": "name,username" });
       userReads += Array.isArray(likes.data) ? likes.data.length : 0;
-      for (const user of likes.data || []) {
-        const id = `${accountId}:${post.id}:${user.id}:like`; const previous = currentMap.get(id);
-        incoming.push({ interactionId: id, accountId, userId: user.id, username: user.username, name: user.name, reactionType: "like", postId: post.id, postText: String(post.text || "").substring(0, 180), occurredAt: post.created_at, score: Math.min(100, 42 + Number(previous?.likeCount || 0) * 2), stage: previous?.stage || "new", status: previous?.status || "unread", likeCount: previous?.likeCount || 1, replyCount: previous?.replyCount || 0, quoteCount: previous?.quoteCount || 0, repostCount: previous?.repostCount || 0, tags: previous?.tags || "", memo: previous?.memo || "", updatedAt: new Date().toISOString() });
+      for (const user of (likes.data || []).slice(0, likingUsersLimit)) {
+        interactions.push({ interactionId: `${accountId}:${post.id}:${user.id}:like`, accountId, userId: String(user.id || ""), username: String(user.username || ""), name: String(user.name || ""), reactionType: "like", postId: String(post.id || ""), postText: String(post.text || "").substring(0, 180), occurredAt: String(post.created_at || "") });
       }
     } catch (error) {
       const message = `Failed to fetch liking users for post ${post.id}: ${String(error)}`.substring(0, 240);
@@ -122,8 +129,7 @@ function refreshAccount(accountId: string, settings: MarketingSettings): { resou
     for (const mention of mentions.data || []) {
       const user: any = mentionUsers.get(String(mention.author_id));
       if (!user) continue;
-      const id = `${accountId}:${mention.id}:${user.id}:reply`; const previous = currentMap.get(id);
-      incoming.push({ interactionId: id, accountId, userId: user.id, username: user.username, name: user.name, reactionType: "reply", postId: mention.id, postText: String(mention.text || "").substring(0, 180), occurredAt: mention.created_at, score: Math.min(100, 72 + Number(previous?.replyCount || 0) * 5), stage: previous?.stage || "new", status: previous?.status || "unread", likeCount: previous?.likeCount || 0, replyCount: previous?.replyCount || 1, quoteCount: previous?.quoteCount || 0, repostCount: previous?.repostCount || 0, tags: previous?.tags || "", memo: previous?.memo || "", updatedAt: new Date().toISOString() });
+      interactions.push({ interactionId: `${accountId}:${mention.id}:${user.id}:reply`, accountId, userId: String(user.id || ""), username: String(user.username || ""), name: String(user.name || ""), reactionType: "reply", postId: String(mention.id || ""), postText: String(mention.text || "").substring(0, 180), occurredAt: String(mention.created_at || "") });
     }
   } catch (error) {
     const message = `Failed to fetch mentions for account ${accountId}: ${String(error)}`.substring(0, 240);
@@ -132,44 +138,137 @@ function refreshAccount(accountId: string, settings: MarketingSettings): { resou
   }
   const costUsd = postReads * OWNED_POST_READ_USD + userReads * USER_READ_USD;
   const resources = postReads + userReads;
-  upsertRows(incoming, false, current); appendRun(accountId, resources, costUsd, partialErrors.length ? "warning" : "success", partialErrors.join(" | ").substring(0, 500)); return { resources, costUsd };
+  return { accountId, interactions, resources, costUsd, partialErrors };
+}
+
+function mergeFetchedInteractions(existingRows: any[], fetched: FetchedInteraction[]) {
+  const merged = new Map(existingRows.map((row) => [String(row.interactionId), row]));
+  for (const interaction of fetched) {
+    const previous = merged.get(interaction.interactionId);
+    const isLike = interaction.reactionType === "like";
+    merged.set(interaction.interactionId, {
+      ...previous,
+      ...interaction,
+      score: isLike
+        ? Math.min(100, 42 + Number(previous?.likeCount || 0) * 2)
+        : Math.min(100, 72 + Number(previous?.replyCount || 0) * 5),
+      stage: previous?.stage || "new",
+      status: previous?.status || "unread",
+      likeCount: previous?.likeCount || (isLike ? 1 : 0),
+      replyCount: previous?.replyCount || (isLike ? 0 : 1),
+      quoteCount: previous?.quoteCount || 0,
+      repostCount: previous?.repostCount || 0,
+      tags: previous?.tags || "",
+      memo: previous?.memo || "",
+      updatedAt: new Date().toISOString(),
+    });
+  }
+  return Array.from(merged.values());
+}
+
+function startRefreshLease() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return "";
+  try {
+    const properties = PropertiesService.getScriptProperties();
+    const raw = properties.getProperty(REFRESH_LEASE_KEY);
+    if (raw) {
+      try {
+        const lease = JSON.parse(raw);
+        if (Date.now() - Number(lease.startedAt) < REFRESH_LEASE_TTL_MS) return "";
+      } catch (_) { /* Replace an invalid lease below. */ }
+    }
+    const id = Utilities.getUuid();
+    properties.setProperty(REFRESH_LEASE_KEY, JSON.stringify({ id, startedAt: Date.now() }));
+    return id;
+  } finally { lock.releaseLock(); }
+}
+
+function clearRefreshLease(id: string) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return;
+  try {
+    const properties = PropertiesService.getScriptProperties();
+    const raw = properties.getProperty(REFRESH_LEASE_KEY);
+    if (!raw) return;
+    try {
+      if (JSON.parse(raw).id === id) properties.deleteProperty(REFRESH_LEASE_KEY);
+    } catch (_) { properties.deleteProperty(REFRESH_LEASE_KEY); }
+  } finally { lock.releaseLock(); }
 }
 
 export function refreshXMarketingDaily() {
-  const lock = LockService.getScriptLock(); if (!lock.tryLock(5000)) return { status: "already_running" };
+  const settings = getSettings(); if (!settings.enabled) return { status: "disabled" };
+  const leaseId = startRefreshLease(); if (!leaseId) return { status: "already_running" };
   try {
-    const settings = getSettings(); if (!settings.enabled) return { status: "disabled" };
     let currentCostUsd = monthlyUsage().costUsd;
     if (currentCostUsd >= settings.monthlyLimitUsd) return { status: "budget_stopped" };
-    let resources = 0; const errors: any[] = [];
+    let resources = 0; const errors: any[] = []; const results: AccountFetchResult[] = []; const runs: RunEntry[] = [];
     for (const account of getXAuthAll()) {
       if (currentCostUsd >= settings.monthlyLimitUsd) {
         const message = "Monthly budget limit reached during execution";
         errors.push({ accountId: account.accountId, message });
-        appendRun(account.accountId, 0, 0, "budget_stopped", message);
+        runs.push({ accountId: account.accountId, resources: 0, costUsd: 0, status: "budget_stopped", message });
         break;
       }
-      try { const result = refreshAccount(account.accountId, settings); resources += result.resources; currentCostUsd += result.costUsd; } catch (error: any) { const message = String(error.message || error).substring(0, 240); errors.push({ accountId: account.accountId, message }); appendRun(account.accountId, 0, 0, "error", message); }
+      try {
+        const result = fetchAccount(account.accountId, settings);
+        results.push(result); resources += result.resources; currentCostUsd += result.costUsd;
+        runs.push({ accountId: account.accountId, resources: result.resources, costUsd: result.costUsd, status: result.partialErrors.length ? "warning" : "success", message: result.partialErrors.join(" | ").substring(0, 500) });
+      } catch (error: any) {
+        const message = String(error.message || error).substring(0, 240);
+        errors.push({ accountId: account.accountId, message });
+        runs.push({ accountId: account.accountId, resources: 0, costUsd: 0, status: "error", message });
+      }
     }
-    return { status: errors.length ? "warning" : "success", resources, errors };
-  } finally { lock.releaseLock(); }
+
+    const lock = LockService.getScriptLock();
+    if (!lock.tryLock(30000)) throw new Error("X_MARKETING_WRITE_LOCK_TIMEOUT");
+    try {
+      const fetched = results.flatMap((result) => result.interactions);
+      if (fetched.length) replaceRows(mergeFetchedInteractions(readRows(), fetched));
+      appendRuns(runs);
+    } finally { lock.releaseLock(); }
+
+    const hasPartialErrors = results.some((result) => result.partialErrors.length > 0);
+    return { status: errors.length || hasPartialErrors ? "warning" : "success", resources, errors };
+  } finally { clearRefreshLease(leaseId); }
 }
 
 function publicInteraction(row: any) { return { id: String(row.interactionId || ""), accountId: String(row.accountId || ""), userId: String(row.userId || ""), username: String(row.username || ""), name: String(row.name || ""), reactionType: String(row.reactionType || ""), postId: String(row.postId || ""), postText: String(row.postText || ""), occurredAt: row.occurredAt instanceof Date ? row.occurredAt.toISOString() : String(row.occurredAt || ""), score: Number(row.score) || 0, stage: String(row.stage || "new"), status: String(row.status || "unread"), counts: { likes: Number(row.likeCount) || 0, replies: Number(row.replyCount) || 0, quotes: Number(row.quoteCount) || 0, reposts: Number(row.repostCount) || 0 }, tags: String(row.tags || "").split(",").map((v) => v.trim()).filter(Boolean), memo: String(row.memo || "") }; }
 
 export function getXMarketingDashboard(params: any = {}) {
-  const accountId = String(params.accountId || "all"); const usage = monthlyUsage(); const settings = getSettings();
-  return { settings, accounts: getXAuthAll().map((a) => ({ accountId: a.accountId, estimatedCostUsd: usage.byAccount[a.accountId] || 0 })), globalCost: { estimatedUsd: usage.costUsd, limitUsd: settings.monthlyLimitUsd, resources: usage.resources }, interactions: readRows().filter((r) => accountId === "all" || String(r.accountId) === accountId).map(publicInteraction), lastSyncedAt: new Date().toISOString() };
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) throw new Error("X_MARKETING_READ_LOCK_TIMEOUT");
+  try {
+    const accountId = String(params.accountId || "all"); const usage = monthlyUsage(); const settings = getSettings();
+    return { settings, accounts: getXAuthAll().map((a) => ({ accountId: a.accountId, estimatedCostUsd: usage.byAccount[a.accountId] || 0 })), globalCost: { estimatedUsd: usage.costUsd, limitUsd: settings.monthlyLimitUsd, resources: usage.resources }, interactions: readRows().filter((r) => accountId === "all" || String(r.accountId) === accountId).map(publicInteraction), lastSyncedAt: new Date().toISOString() };
+  } finally { lock.releaseLock(); }
 }
 
 export function updateXMarketingProspect(input: any) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) throw new Error("X_MARKETING_UPDATE_LOCK_TIMEOUT");
   try {
-    if (!input?.interactionId) throw new Error("Missing interactionId"); const rows = readRows(); const target = rows.find((r) => String(r.interactionId) === String(input.interactionId)); if (!target) throw new Error("X_MARKETING_INTERACTION_NOT_FOUND");
+    if (!input?.interactionId) throw new Error("Missing interactionId");
+    const targetSheet = getSheet(INTERACTIONS_SHEET, HEADERS);
+    const rowCount = targetSheet.getLastRow() - 1;
+    if (rowCount < 1) throw new Error("X_MARKETING_INTERACTION_NOT_FOUND");
+    const interactionIdColumn = HEADERS.indexOf("interactionId") + 1;
+    const rowOffset = targetSheet.getRange(2, interactionIdColumn, rowCount, 1).getValues()
+      .findIndex((row) => String(row[0]) === String(input.interactionId));
+    if (rowOffset < 0) throw new Error("X_MARKETING_INTERACTION_NOT_FOUND");
+    const sheetRow = rowOffset + 2;
+    const rowValues = targetSheet.getRange(sheetRow, 1, 1, HEADERS.length).getValues()[0];
+    const target = Object.fromEntries(HEADERS.map((header, index) => [header, rowValues[index]]));
     if (["new", "interested", "conversation", "completed"].includes(input.stage)) target.stage = input.stage;
     if (["unread", "read", "handled"].includes(input.status)) target.status = input.status;
-    if (Array.isArray(input.tags)) target.tags = input.tags.slice(0, 10).join(","); if (typeof input.memo === "string") target.memo = input.memo.substring(0, 500); target.updatedAt = new Date().toISOString(); upsertRows(rows, true);
+    if (Array.isArray(input.tags)) target.tags = input.tags.slice(0, 10).join(",");
+    if (typeof input.memo === "string") target.memo = input.memo.substring(0, 500);
+    target.updatedAt = new Date().toISOString();
+    targetSheet.getRange(sheetRow, 1, 1, HEADERS.length).setValues([
+      HEADERS.map((header) => target[header] ?? ""),
+    ]);
     return { status: "success", interaction: publicInteraction(target) };
   } finally { lock.releaseLock(); }
 }
