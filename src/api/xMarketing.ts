@@ -301,6 +301,7 @@ export function getXMarketingDashboard(params: any = {}) {
     },
     interactions: readRows()
       .filter((row) => accountId === "all" || String(row.accountId) === accountId)
+      .slice(-1000)
       .map(publicInteraction),
     lastSyncedAt: new Date().toISOString(),
   };
