@@ -75,8 +75,11 @@ function readRows(): any[] {
 function replaceRows(source: any[]) {
   const target = getSheet(INTERACTIONS_SHEET, HEADERS);
   const rows = source.map((row) => HEADERS.map((h) => row[h] ?? ""));
-  if (target.getLastRow() > 1) target.getRange(2, 1, target.getLastRow() - 1, HEADERS.length).clearContent();
+  const lastRow = target.getLastRow();
   if (rows.length) target.getRange(2, 1, rows.length, HEADERS.length).setValues(rows);
+  if (lastRow > rows.length + 1) {
+    target.getRange(rows.length + 2, 1, lastRow - (rows.length + 1), HEADERS.length).clearContent();
+  }
 }
 
 function monthKey(date = new Date()) { return Utilities.formatDate(date, "UTC", "yyyy-MM"); }
@@ -154,10 +157,10 @@ function mergeFetchedInteractions(existingRows: any[], fetched: FetchedInteracti
         : Math.min(100, 72 + Number(previous?.replyCount || 0) * 5),
       stage: previous?.stage || "new",
       status: previous?.status || "unread",
-      likeCount: previous?.likeCount || (isLike ? 1 : 0),
-      replyCount: previous?.replyCount || (isLike ? 0 : 1),
-      quoteCount: previous?.quoteCount || 0,
-      repostCount: previous?.repostCount || 0,
+      likeCount: previous?.likeCount ?? (isLike ? 1 : 0),
+      replyCount: previous?.replyCount ?? (isLike ? 0 : 1),
+      quoteCount: previous?.quoteCount ?? 0,
+      repostCount: previous?.repostCount ?? 0,
       tags: previous?.tags || "",
       memo: previous?.memo || "",
       updatedAt: new Date().toISOString(),
