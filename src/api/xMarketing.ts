@@ -140,14 +140,16 @@ function fetchAccount(accountId: string, settings: MarketingSettings): AccountFe
   const tweets = signedGet(authInfo, `https://api.x.com/2/users/${userId}/tweets`, { max_results: String(Math.max(5, settings.maxPostsPerAccount)), start_time: new Date(Date.now() - settings.trackingDays * 86400000).toISOString(), exclude: "retweets", "tweet.fields": "created_at,public_metrics" });
   const interactions: FetchedInteraction[] = [];
   const partialErrors: string[] = [];
-  let postReads = Array.isArray(tweets.data) ? tweets.data.length : 0;
+  const tweetData = Array.isArray(tweets?.data) ? tweets.data : [];
+  let postReads = tweetData.length;
   let userReads = 1;
   const likingUsersLimit = Math.max(1, Math.min(100, Number(settings.maxLikingUsersPerPost) || 1));
-  for (const post of (tweets.data || []).slice(0, settings.maxPostsPerAccount)) {
+  for (const post of tweetData.filter((post: any) => post?.id).slice(0, settings.maxPostsPerAccount)) {
     try {
       const likes = signedGet(authInfo, `https://api.x.com/2/tweets/${post.id}/liking_users`, { max_results: String(likingUsersLimit), "user.fields": "name,username" });
-      userReads += Array.isArray(likes.data) ? likes.data.length : 0;
-      for (const user of (likes.data || []).slice(0, likingUsersLimit)) {
+      const likeData = Array.isArray(likes?.data) ? likes.data : [];
+      userReads += likeData.length;
+      for (const user of likeData.filter((user: any) => user?.id).slice(0, likingUsersLimit)) {
         interactions.push({ interactionId: `${accountId}:${post.id}:${user.id}:like`, accountId, userId: String(user.id || ""), username: String(user.username || ""), name: String(user.name || ""), reactionType: "like", postId: String(post.id || ""), postText: String(post.text || "").substring(0, 180), occurredAt: String(post.created_at || "") });
       }
     } catch (error) {
@@ -160,10 +162,13 @@ function fetchAccount(accountId: string, settings: MarketingSettings): AccountFe
     const mentions = signedGet(authInfo, `https://api.x.com/2/users/${userId}/mentions`, { max_results: String(Math.max(5, settings.maxPostsPerAccount)), start_time: new Date(Date.now() - settings.trackingDays * 86400000).toISOString(), expansions: "author_id", "tweet.fields": "author_id,created_at", "user.fields": "name,username" });
     const mentionData = Array.isArray(mentions?.data) ? mentions.data : [];
     const includedUsers = Array.isArray(mentions?.includes?.users) ? mentions.includes.users : [];
-    const mentionUsers = new Map<string, any>(includedUsers.map((user: any) => [String(user.id), user]));
+    const mentionUsers = new Map<string, any>(includedUsers
+      .filter((user: any) => user?.id)
+      .map((user: any) => [String(user.id), user]));
     postReads += mentionData.length;
     userReads += mentionUsers.size;
     for (const mention of mentionData) {
+      if (!mention?.id || !mention?.author_id) continue;
       const user: any = mentionUsers.get(String(mention.author_id));
       if (!user) continue;
       interactions.push({ interactionId: `${accountId}:${mention.id}:${user.id}:reply`, accountId, userId: String(user.id || ""), username: String(user.username || ""), name: String(user.name || ""), reactionType: "reply", postId: String(mention.id || ""), postText: String(mention.text || "").substring(0, 180), occurredAt: String(mention.created_at || "") });
