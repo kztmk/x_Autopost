@@ -111,18 +111,23 @@ function monthlyUsage() {
   const lastRow = target.getLastRow();
   if (lastRow < 2) return { resources, costUsd, byAccount };
   const currentMonth = monthKey();
-  const matches = target.getRange(2, 2, lastRow - 1, 1)
-    .createTextFinder(currentMonth)
-    .matchEntireCell(true)
-    .useRegularExpression(false)
-    .findAll();
-  if (!matches.length) return { resources, costUsd, byAccount };
-  const matchingRows = matches.map((match) => match.getRow());
-  const firstMatchingRow = Math.min(...matchingRows);
-  const lastMatchingRow = Math.max(...matchingRows);
+  const timestamps = target.getRange(2, 1, lastRow - 1, 1).getValues();
+  let firstMatchingRow = 0;
+  let lastMatchingRow = 0;
+  for (let index = 0; index < timestamps.length; index += 1) {
+    const timestamp = timestamps[index][0];
+    if (!(timestamp instanceof Date) || Number.isNaN(timestamp.getTime())) continue;
+    if (monthKey(timestamp) !== currentMonth) continue;
+    const sheetRow = index + 2;
+    if (!firstMatchingRow) firstMatchingRow = sheetRow;
+    lastMatchingRow = sheetRow;
+  }
+  if (!firstMatchingRow) return { resources, costUsd, byAccount };
   const rows = target.getRange(firstMatchingRow, 1, lastMatchingRow - firstMatchingRow + 1, 7).getValues();
   for (const row of rows) {
-    if (String(row[1]) !== currentMonth) continue;
+    const timestamp = row[0];
+    if (!(timestamp instanceof Date) || Number.isNaN(timestamp.getTime())) continue;
+    if (monthKey(timestamp) !== currentMonth) continue;
     const count = Number(row[3]) || 0;
     const cost = Number(row[4]) || 0;
     const accountId = String(row[2]);
