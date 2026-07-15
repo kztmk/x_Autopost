@@ -72,11 +72,19 @@ function readRows(): any[] {
     .filter((row) => String(row.interactionId || "").trim());
 }
 
+function ensureRowCapacity(target: GoogleAppsScript.Spreadsheet.Sheet, requiredRows: number) {
+  const maxRows = target.getMaxRows();
+  if (requiredRows > maxRows) target.insertRowsAfter(maxRows, requiredRows - maxRows);
+}
+
 function replaceRows(source: any[]) {
   const target = getSheet(INTERACTIONS_SHEET, HEADERS);
   const rows = source.map((row) => HEADERS.map((h) => row[h] ?? ""));
   const lastRow = target.getLastRow();
-  if (rows.length) target.getRange(2, 1, rows.length, HEADERS.length).setValues(rows);
+  if (rows.length) {
+    ensureRowCapacity(target, rows.length + 1);
+    target.getRange(2, 1, rows.length, HEADERS.length).setValues(rows);
+  }
   if (lastRow > rows.length + 1) {
     target.getRange(rows.length + 2, 1, lastRow - (rows.length + 1), HEADERS.length).clearContent();
   }
@@ -89,7 +97,9 @@ function appendRuns(entries: RunEntry[]) {
   const target = getSheet(RUNS_SHEET, headers);
   const timestamp = new Date();
   const month = monthKey(timestamp);
-  target.getRange(target.getLastRow() + 1, 1, entries.length, headers.length).setValues(
+  const firstRow = target.getLastRow() + 1;
+  ensureRowCapacity(target, firstRow + entries.length - 1);
+  target.getRange(firstRow, 1, entries.length, headers.length).setValues(
     entries.map((entry) => [timestamp, month, entry.accountId, entry.resources, entry.costUsd, entry.status, entry.message || ""])
   );
 }
@@ -238,7 +248,12 @@ export function refreshXMarketingDaily() {
   } finally { clearRefreshLease(leaseId); }
 }
 
-function publicInteraction(row: any) { return { id: String(row.interactionId || ""), accountId: String(row.accountId || ""), userId: String(row.userId || ""), username: String(row.username || ""), name: String(row.name || ""), reactionType: String(row.reactionType || ""), postId: String(row.postId || ""), postText: String(row.postText || ""), occurredAt: row.occurredAt instanceof Date ? row.occurredAt.toISOString() : String(row.occurredAt || ""), score: Number(row.score) || 0, stage: String(row.stage || "new"), status: String(row.status || "unread"), counts: { likes: Number(row.likeCount) || 0, replies: Number(row.replyCount) || 0, quotes: Number(row.quoteCount) || 0, reposts: Number(row.repostCount) || 0 }, tags: String(row.tags || "").split(",").map((v) => v.trim()).filter(Boolean), memo: String(row.memo || "") }; }
+function serializeDate(value: any) {
+  if (!(value instanceof Date)) return String(value || "");
+  return Number.isNaN(value.getTime()) ? "" : value.toISOString();
+}
+
+function publicInteraction(row: any) { return { id: String(row.interactionId || ""), accountId: String(row.accountId || ""), userId: String(row.userId || ""), username: String(row.username || ""), name: String(row.name || ""), reactionType: String(row.reactionType || ""), postId: String(row.postId || ""), postText: String(row.postText || ""), occurredAt: serializeDate(row.occurredAt), score: Number(row.score) || 0, stage: String(row.stage || "new"), status: String(row.status || "unread"), counts: { likes: Number(row.likeCount) || 0, replies: Number(row.replyCount) || 0, quotes: Number(row.quoteCount) || 0, reposts: Number(row.repostCount) || 0 }, tags: String(row.tags || "").split(",").map((v) => v.trim()).filter(Boolean), memo: String(row.memo || "") }; }
 
 export function getXMarketingDashboard(params: any = {}) {
   const lock = LockService.getScriptLock();
