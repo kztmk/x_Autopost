@@ -9,6 +9,7 @@ const REFRESH_LEASE_KEY = "x_marketing_refresh_lease";
 const REFRESH_LEASE_TTL_MS = 15 * 60 * 1000;
 const OWNED_POST_READ_USD = 0.001;
 const USER_READ_USD = 0.01;
+const MAX_STORED_INTERACTIONS = 2000;
 const HEADERS = ["interactionId", "accountId", "userId", "username", "name", "reactionType", "postId", "postText", "occurredAt", "score", "stage", "status", "likeCount", "replyCount", "quoteCount", "repostCount", "tags", "memo", "updatedAt"];
 type Query = Record<string, string>;
 type MarketingSettings = { enabled: boolean; trackingDays: number; maxPostsPerAccount: number; maxLikingUsersPerPost: number; monthlyLimitUsd: number };
@@ -157,10 +158,12 @@ function fetchAccount(accountId: string, settings: MarketingSettings): AccountFe
   }
   try {
     const mentions = signedGet(authInfo, `https://api.x.com/2/users/${userId}/mentions`, { max_results: String(Math.max(5, settings.maxPostsPerAccount)), start_time: new Date(Date.now() - settings.trackingDays * 86400000).toISOString(), expansions: "author_id", "tweet.fields": "author_id,created_at", "user.fields": "name,username" });
-    const mentionUsers = new Map<string, any>((mentions.includes?.users || []).map((user: any) => [String(user.id), user]));
-    postReads += Array.isArray(mentions.data) ? mentions.data.length : 0;
+    const mentionData = Array.isArray(mentions?.data) ? mentions.data : [];
+    const includedUsers = Array.isArray(mentions?.includes?.users) ? mentions.includes.users : [];
+    const mentionUsers = new Map<string, any>(includedUsers.map((user: any) => [String(user.id), user]));
+    postReads += mentionData.length;
     userReads += mentionUsers.size;
-    for (const mention of mentions.data || []) {
+    for (const mention of mentionData) {
       const user: any = mentionUsers.get(String(mention.author_id));
       if (!user) continue;
       interactions.push({ interactionId: `${accountId}:${mention.id}:${user.id}:reply`, accountId, userId: String(user.id || ""), username: String(user.username || ""), name: String(user.name || ""), reactionType: "reply", postId: String(mention.id || ""), postText: String(mention.text || "").substring(0, 180), occurredAt: String(mention.created_at || "") });
@@ -179,6 +182,16 @@ function normalizeCount(value: any, fallback: number) {
   if (value === "" || value === null || value === undefined) return fallback;
   const count = Number(value);
   return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : fallback;
+}
+
+function getInteractionTimestamp(row: any) {
+  const occurredAt = row?.occurredAt;
+  if (occurredAt instanceof Date) {
+    const timestamp = occurredAt.getTime();
+    return Number.isNaN(timestamp) ? 0 : timestamp;
+  }
+  const timestamp = Date.parse(String(occurredAt || ""));
+  return Number.isNaN(timestamp) ? 0 : timestamp;
 }
 
 function mergeFetchedInteractions(existingRows: any[], fetched: FetchedInteraction[]) {
@@ -205,7 +218,9 @@ function mergeFetchedInteractions(existingRows: any[], fetched: FetchedInteracti
       updatedAt: new Date().toISOString(),
     });
   }
-  return Array.from(merged.values());
+  return Array.from(merged.values())
+    .sort((a, b) => getInteractionTimestamp(a) - getInteractionTimestamp(b))
+    .slice(-MAX_STORED_INTERACTIONS);
 }
 
 function startRefreshLease() {
