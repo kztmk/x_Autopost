@@ -334,10 +334,15 @@ function monthlyUsage() {
   }
   if (!firstMatchingRow) return { resources, costUsd, byAccount, lastSyncedAt };
   const rows = target.getRange(firstMatchingRow, 1, lastMatchingRow - firstMatchingRow + 1, 7).getValues();
+  let lastSyncedTime = 0;
   for (const row of rows) {
     const date = parseSheetDate(row[0]);
     if (!date || monthKey(date) !== currentMonth) continue;
-    if (!lastSyncedAt || date.getTime() > new Date(lastSyncedAt).getTime()) lastSyncedAt = date.toISOString();
+    const time = date.getTime();
+    if (time > lastSyncedTime) {
+      lastSyncedTime = time;
+      lastSyncedAt = date.toISOString();
+    }
     const count = Number(row[3]) || 0;
     const cost = Number(row[4]) || 0;
     const accountId = String(row[2]);
