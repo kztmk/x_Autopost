@@ -487,6 +487,10 @@ function normalizeCount(value: any, fallback: number) {
   return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : fallback;
 }
 
+function isTrueCellValue(value: any) {
+  return value === true || (typeof value === "string" && value.trim().toUpperCase() === "TRUE");
+}
+
 function getInteractionTimestamp(row: any) {
   const occurredAt = row?.occurredAt;
   if (occurredAt instanceof Date) {
@@ -656,7 +660,7 @@ function publicInteraction(row: any) { return { id: String(row.interactionId || 
 function publicPostAnalytics(row: any) {
   const impressions = normalizeCount(row.impressions, 0);
   const engagements = normalizeCount(row.engagements, 0);
-  const impressionsAvailable = row.impressionsAvailable === true;
+  const impressionsAvailable = isTrueCellValue(row.impressionsAvailable);
   return {
     id: String(row.analyticsId || ""),
     accountId: String(row.accountId || ""),
@@ -679,8 +683,8 @@ function publicPostAnalytics(row: any) {
     metricSource: ["non_public", "organic"].includes(String(row.metricSource)) ? String(row.metricSource) : "public",
     availability: {
       impressions: impressionsAvailable,
-      profileClicks: row.profileClicksAvailable === true,
-      urlClicks: row.urlClicksAvailable === true,
+      profileClicks: isTrueCellValue(row.profileClicksAvailable),
+      urlClicks: isTrueCellValue(row.urlClicksAvailable),
     },
   };
 }
@@ -701,7 +705,7 @@ function aggregateDailyAnalytics(rows: any[], accountId: string, trackingDays: n
     current.replies += normalizeCount(row.replies, 0);
     current.reposts += normalizeCount(row.reposts, 0);
     current.quotes += normalizeCount(row.quotes, 0);
-    current.impressionsAvailable = current.impressionsAvailable && row.impressionsAvailable === true;
+    current.impressionsAvailable = current.impressionsAvailable && isTrueCellValue(row.impressionsAvailable);
     grouped.set(key, current);
   });
   return Array.from(grouped.values())
