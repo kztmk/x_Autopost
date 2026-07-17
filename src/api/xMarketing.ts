@@ -529,7 +529,12 @@ function getTimestamp(value: any) {
     const timestamp = value.getTime();
     return Number.isNaN(timestamp) ? 0 : timestamp;
   }
-  const timestamp = Date.parse(String(value || ""));
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const text = String(value ?? "").trim();
+  if (text === "") return 0;
+  const numericTimestamp = Number(text);
+  if (Number.isFinite(numericTimestamp)) return numericTimestamp;
+  const timestamp = Date.parse(text);
   return Number.isNaN(timestamp) ? 0 : timestamp;
 }
 
