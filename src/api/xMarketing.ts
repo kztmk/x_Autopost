@@ -59,7 +59,18 @@ export function upsertXMarketingSettings(input: Partial<MarketingSettings>) {
 function getSheet(name: string, headers: string[]) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let target = ss.getSheetByName(name);
-  if (!target) target = ss.insertSheet(name);
+  if (!target) {
+    try {
+      target = ss.insertSheet(name);
+    } catch (error) {
+      target = ss.getSheetByName(name);
+      if (!target) throw error;
+    }
+  }
+  const maxColumns = target.getMaxColumns();
+  if (maxColumns < headers.length) {
+    target.insertColumnsAfter(maxColumns, headers.length - maxColumns);
+  }
   const currentHeaders = target.getRange(1, 1, 1, headers.length).getValues()[0];
   if (headers.some((header, index) => String(currentHeaders[index] || "") !== header)) {
     target.getRange(1, 1, 1, headers.length).setValues([headers]);
@@ -287,6 +298,11 @@ export function deleteXMarketingSampleData() {
 }
 
 function monthKey(date = new Date()) { return Utilities.formatDate(date, "UTC", "yyyy-MM"); }
+function parseSheetDate(value: any) {
+  if (value === "" || value === null || value === undefined) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
 function appendRuns(entries: RunEntry[]) {
   if (!entries.length) return;
   const target = getSheet(RUNS_SHEET, RUN_HEADERS);
@@ -310,9 +326,8 @@ function monthlyUsage() {
   let firstMatchingRow = 0;
   let lastMatchingRow = 0;
   for (let index = 0; index < timestamps.length; index += 1) {
-    const timestamp = timestamps[index][0];
-    if (!(timestamp instanceof Date) || Number.isNaN(timestamp.getTime())) continue;
-    if (monthKey(timestamp) !== currentMonth) continue;
+    const date = parseSheetDate(timestamps[index][0]);
+    if (!date || monthKey(date) !== currentMonth) continue;
     const sheetRow = index + 2;
     if (!firstMatchingRow) firstMatchingRow = sheetRow;
     lastMatchingRow = sheetRow;
@@ -320,10 +335,9 @@ function monthlyUsage() {
   if (!firstMatchingRow) return { resources, costUsd, byAccount, lastSyncedAt };
   const rows = target.getRange(firstMatchingRow, 1, lastMatchingRow - firstMatchingRow + 1, 7).getValues();
   for (const row of rows) {
-    const timestamp = row[0];
-    if (!(timestamp instanceof Date) || Number.isNaN(timestamp.getTime())) continue;
-    if (monthKey(timestamp) !== currentMonth) continue;
-    if (!lastSyncedAt || timestamp.getTime() > new Date(lastSyncedAt).getTime()) lastSyncedAt = timestamp.toISOString();
+    const date = parseSheetDate(row[0]);
+    if (!date || monthKey(date) !== currentMonth) continue;
+    if (!lastSyncedAt || date.getTime() > new Date(lastSyncedAt).getTime()) lastSyncedAt = date.toISOString();
     const count = Number(row[3]) || 0;
     const cost = Number(row[4]) || 0;
     const accountId = String(row[2]);
