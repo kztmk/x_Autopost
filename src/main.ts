@@ -11,6 +11,7 @@ import {
 } from "./api/discordNotification";
 
 import * as apiv2 from "./apiv2";
+import { refreshXMarketingDaily } from "./api/xMarketing";
 
 // --- PropertiesService と定数 ---
 const scriptProperties = PropertiesService.getScriptProperties();
@@ -979,4 +980,4 @@ async function processPost(
 }
 
 // Export functions that should be accessible from other modules or via API endpoints
-export { autoPostToX, getTriggerIntervalMinutes };
+export { autoPostToX, getTriggerIntervalMinutes, refreshXMarketingDaily };
