@@ -549,6 +549,15 @@ function snapshotDate(value: string | Date) {
   return Utilities.formatDate(validDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
 }
 
+function normalizeSnapshotDate(value: any) {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  }
+  const date = parseSheetDate(value);
+  return date ? snapshotDate(date) : "";
+}
+
 function mergeDailyAnalytics(existingRows: any[], fetched: FetchedPostAnalytics[]) {
   const merged = new Map(existingRows.map((row) => [String(row.snapshotId), row]));
   fetched.forEach((post) => {
@@ -681,7 +690,7 @@ function aggregateDailyAnalytics(rows: any[], accountId: string, trackingDays: n
   const grouped = new Map<string, any>();
   rows.forEach((row) => {
     const rowAccountId = String(row.accountId || "");
-    const date = String(row.snapshotDate || "");
+    const date = normalizeSnapshotDate(row.snapshotDate);
     if (!date || date < startDate || (accountId !== "all" && rowAccountId !== accountId)) return;
     const key = `${rowAccountId}:${date}`;
     const current = grouped.get(key) || { accountId: rowAccountId, date, postCount: 0, impressions: 0, engagements: 0, likes: 0, replies: 0, reposts: 0, quotes: 0, impressionsAvailable: true };
