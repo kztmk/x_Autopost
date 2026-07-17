@@ -297,7 +297,7 @@ export function deleteXMarketingSampleData() {
   } finally { lock.releaseLock(); }
 }
 
-function monthKey(date = new Date()) { return Utilities.formatDate(date, "UTC", "yyyy-MM"); }
+function monthKey(date = new Date()) { return Utilities.formatDate(date, Session.getScriptTimeZone(), "yyyy-MM"); }
 function parseSheetDate(value: any) {
   if (value === "" || value === null || value === undefined) return null;
   const date = value instanceof Date ? value : new Date(value);
@@ -492,13 +492,7 @@ function isTrueCellValue(value: any) {
 }
 
 function getInteractionTimestamp(row: any) {
-  const occurredAt = row?.occurredAt;
-  if (occurredAt instanceof Date) {
-    const timestamp = occurredAt.getTime();
-    return Number.isNaN(timestamp) ? 0 : timestamp;
-  }
-  const timestamp = Date.parse(String(occurredAt || ""));
-  return Number.isNaN(timestamp) ? 0 : timestamp;
+  return getTimestamp(row?.occurredAt);
 }
 
 function mergeFetchedInteractions(existingRows: any[], fetched: FetchedInteraction[]) {
