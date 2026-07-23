@@ -95,6 +95,54 @@ function deleteAllTriggersWrapper() {
 }
 
 /**
+ * 自動投稿用の指定ハンドラだけを削除する。
+ * Xマーケティングなど、同じGASプロジェクト内の別トリガーは維持する。
+ */
+function deleteTimeBasedTrigger(postData: { functionName?: string } = {}) {
+  const functionName =
+    typeof postData.functionName === "string" &&
+    postData.functionName.trim() !== ""
+      ? postData.functionName.trim()
+      : "autoPostToX";
+
+  if (functionName !== "autoPostToX") {
+    return {
+      status: "error",
+      message: `Unsupported trigger handler: ${functionName}`,
+    };
+  }
+
+  try {
+    const matchingTriggers = ScriptApp.getProjectTriggers().filter(
+      (trigger) => trigger.getHandlerFunction() === functionName
+    );
+
+    matchingTriggers.forEach((trigger) => {
+      const triggerId = trigger.getUniqueId();
+      ScriptApp.deleteTrigger(trigger);
+      scriptProperties.deleteProperty(TRIGGER_INTERVAL_PREFIX + triggerId);
+    });
+
+    return {
+      status: "success",
+      message: matchingTriggers.length
+        ? `Deleted ${matchingTriggers.length} trigger(s) for '${functionName}'.`
+        : `No trigger for '${functionName}' was found.`,
+      data: {
+        functionName,
+        deletedCount: matchingTriggers.length,
+      },
+    };
+  } catch (error: any) {
+    Logger.log(`Error deleting trigger for '${functionName}': ${error}`);
+    return {
+      status: "error",
+      message: `Failed to delete trigger for '${functionName}': ${error.message}`,
+    };
+  }
+}
+
+/**
  * 指定された関数名に紐づくプロジェクトトリガーが存在するかどうか、
  * および時間ベースの場合は PropertiesService から設定された間隔（分）を取得します。
  * @param {string} functionName 確認したい関数の名前 (例: 'autoPostToX')。
@@ -193,6 +241,7 @@ function checkTriggerExists(functionName) {
 export {
   createTimeBasedTrigger,
   deleteAllTriggersWrapper as deleteAllTriggers,
+  deleteTimeBasedTrigger,
   checkTriggerExists,
   deleteTriggerByHandler, // Export the new function
 };

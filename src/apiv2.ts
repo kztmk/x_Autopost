@@ -19,7 +19,7 @@ import {
 import {
   checkTriggerExists,
   createTimeBasedTrigger,
-  deleteAllTriggers,
+  deleteTimeBasedTrigger,
 } from "./api/triggers";
 import { archiveSheet } from "./api/archive";
 import { upsertNotificationSettings } from "./api/notificationSettings";
@@ -50,6 +50,45 @@ interface ArchiveRequestData {
 }
 
 const LOG_SHEET_NAME = "log";
+
+const FIREBASE_SETUP_UI_TEXT = {
+  ja: {
+    menu: "虎威連携",
+    menuItem: "本人確認コードを生成",
+    dialogTitle: "虎威 本人確認コード",
+    heading: "虎威 本人確認コード",
+    instruction:
+      "以下のコードを虎威のプロフィール画面に入力してください。",
+    expiration: "このコードの有効期限は10分です。",
+    copy: "コピー",
+    copied: "コピーしました",
+  },
+  en: {
+    menu: "Torai Link",
+    menuItem: "Generate verification code",
+    dialogTitle: "Torai Verification Code",
+    heading: "Torai Verification Code",
+    instruction: "Enter the code below on the Profile page in Torai.",
+    expiration: "This code expires in 10 minutes.",
+    copy: "Copy",
+    copied: "Copied",
+  },
+} as const;
+
+type FirebaseSetupLanguage = keyof typeof FIREBASE_SETUP_UI_TEXT;
+
+function getFirebaseSetupLanguage(): FirebaseSetupLanguage {
+  const locale = String(Session.getActiveUserLocale() || "").toLowerCase();
+  return locale === "ja" || locale.startsWith("ja-") || locale.startsWith("ja_")
+    ? "ja"
+    : "en";
+}
+
+function getFirebaseSetupUiText(
+  language: FirebaseSetupLanguage = getFirebaseSetupLanguage()
+) {
+  return FIREBASE_SETUP_UI_TEXT[language];
+}
 
 function appendInitializeLog(
   phase: string,
@@ -128,9 +167,10 @@ export function generateFirebaseSetupCode(): string {
  * Spreadsheetを開いたときに虎威連携メニューを追加します。
  */
 export function onOpen(): void {
+  const uiText = getFirebaseSetupUiText();
   SpreadsheetApp.getUi()
-    .createMenu("虎威連携")
-    .addItem("本人確認コードを生成", "showFirebaseSetupCodeDialog")
+    .createMenu(uiText.menu)
+    .addItem(uiText.menuItem, "showFirebaseSetupCodeDialog")
     .addToUi();
 }
 
@@ -138,14 +178,17 @@ export function onOpen(): void {
  * 虎威へ入力する本人確認コードを生成し、コピーしやすいダイアログで表示します。
  */
 export function showFirebaseSetupCodeDialog(): void {
+  const language = getFirebaseSetupLanguage();
+  const uiText = getFirebaseSetupUiText(language);
   const setupCode = generateFirebaseSetupCode();
+  const copiedText = JSON.stringify(uiText.copied);
   const html = HtmlService.createHtmlOutput(
     `
-      <div style="font-family: Arial, sans-serif; padding: 16px; color: #202124;">
-        <h2 style="font-size: 18px; margin: 0 0 12px;">虎威 本人確認コード</h2>
+      <div lang="${language}" style="font-family: Arial, sans-serif; padding: 16px; color: #202124;">
+        <h2 style="font-size: 18px; margin: 0 0 12px;">${uiText.heading}</h2>
         <p style="font-size: 13px; line-height: 1.7; margin: 0 0 12px;">
-          以下のコードを虎威のプロフィール画面に入力してください。<br>
-          このコードの有効期限は10分です。
+          ${uiText.instruction}<br>
+          ${uiText.expiration}
         </p>
         <input
           id="setupCode"
@@ -158,7 +201,7 @@ export function showFirebaseSetupCodeDialog(): void {
           onclick="copyCode()"
           style="margin-top: 12px; padding: 8px 12px; border: 0; border-radius: 4px; background: #1a73e8; color: white; cursor: pointer;"
         >
-          コピー
+          ${uiText.copy}
         </button>
         <span id="copyStatus" style="margin-left: 8px; font-size: 12px; color: #188038;"></span>
         <script>
@@ -169,7 +212,7 @@ export function showFirebaseSetupCodeDialog(): void {
           function copyCode() {
             input.select();
             document.execCommand('copy');
-            document.getElementById('copyStatus').textContent = 'コピーしました';
+            document.getElementById('copyStatus').textContent = ${copiedText};
           }
         </script>
       </div>
@@ -178,7 +221,7 @@ export function showFirebaseSetupCodeDialog(): void {
     .setWidth(460)
     .setHeight(260);
 
-  SpreadsheetApp.getUi().showModalDialog(html, "虎威 本人確認コード");
+  SpreadsheetApp.getUi().showModalDialog(html, uiText.dialogTitle);
 }
 
 /**
@@ -473,7 +516,7 @@ export function doPost(e) {
               statusCode = 201; // Created
               break;
             case "delete":
-              response = deleteAllTriggers();
+              response = deleteTimeBasedTrigger(requestData);
               statusCode = 201; // OK
               break;
             case "getStatus":
