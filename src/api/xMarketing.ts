@@ -27,6 +27,7 @@ type FetchedPostAnalytics = { analyticsId: string; accountId: string; postId: st
 type AccountFetchResult = { accountId: string; interactions: FetchedInteraction[]; posts: FetchedPostAnalytics[]; resources: number; costUsd: number; partialErrors: string[] };
 type RunEntry = { accountId: string; resources: number; costUsd: number; status: string; message?: string };
 type XMarketingSampleData = { interactions: any[]; posts: any[]; daily: any[]; runs: RunEntry[] };
+type XMarketingSampleLanguage = "ja" | "en";
 const defaults: MarketingSettings = { enabled: false, analyticsEnabled: false, trackingDays: 7, maxPostsPerAccount: 10, maxLikingUsersPerPost: 25, monthlyLimitUsd: 25 };
 
 function getSettings(): MarketingSettings {
@@ -153,10 +154,14 @@ function sampleTimestamp(daysAgo: number, hour = 10) {
   return date.toISOString();
 }
 
-function buildXMarketingSampleData(accountIds: string[]): XMarketingSampleData {
+function normalizeSampleLanguage(value: unknown): XMarketingSampleLanguage {
+  return String(value || "").trim().toLowerCase().split("-")[0] === "en" ? "en" : "ja";
+}
+
+function buildXMarketingSampleData(accountIds: string[], language: XMarketingSampleLanguage): XMarketingSampleData {
   const now = new Date().toISOString();
   const accountFor = (index: number) => accountIds[index % accountIds.length];
-  const interactionSeeds = [
+  const interactionSeedsJa = [
     { username: "yamada_taro_", name: "山田 太郎", reactionType: "reply", score: 92, stage: "conversation", status: "unread", text: "具体的な設定方法を教えていただけますか？", likes: 6, replies: 3, quotes: 0, reposts: 0, tags: "SNS運用,中小企業", memo: "導入時期を確認する" },
     { username: "misa_works", name: "佐藤 美咲", reactionType: "like", score: 64, stage: "interested", status: "unread", text: "X運用で最初に整えたい3つのポイントをまとめました。", likes: 4, replies: 0, quotes: 0, reposts: 0, tags: "マーケティング", memo: "" },
     { username: "suzuki_biz", name: "鈴木 健太", reactionType: "repost", score: 78, stage: "interested", status: "unread", text: "投稿作成を効率化するためのチェックリストです。", likes: 2, replies: 0, quotes: 0, reposts: 2, tags: "業務改善", memo: "資料送付を検討" },
@@ -170,6 +175,21 @@ function buildXMarketingSampleData(accountIds: string[]): XMarketingSampleData {
     { username: "kikuchi_pr", name: "菊池 広報", reactionType: "quote", score: 76, stage: "interested", status: "read", text: "担当者間で反応者を共有する方法をご紹介します。", likes: 2, replies: 1, quotes: 1, reposts: 0, tags: "SNS運用,要フォロー", memo: "来週フォロー" },
     { username: "local_cafe_sora", name: "カフェ空", reactionType: "follow", score: 48, stage: "completed", status: "handled", text: "", likes: 0, replies: 0, quotes: 0, reposts: 0, tags: "中小企業", memo: "導入済み" },
   ];
+  const interactionSeedsEn = [
+    { username: "alex_ops_lab", name: "Alex Morgan", reactionType: "reply", score: 92, stage: "conversation", status: "unread", text: "Could you share the recommended setup steps?", likes: 6, replies: 3, quotes: 0, reposts: 0, tags: "Social media,Small business", memo: "Confirm the target launch date" },
+    { username: "maya_builds", name: "Maya Chen", reactionType: "like", score: 64, stage: "interested", status: "unread", text: "Three essentials to set up before you start managing X.", likes: 4, replies: 0, quotes: 0, reposts: 0, tags: "Marketing", memo: "" },
+    { username: "jordan_growth", name: "Jordan Brooks", reactionType: "repost", score: 78, stage: "interested", status: "unread", text: "A practical checklist for a faster content workflow.", likes: 2, replies: 0, quotes: 0, reposts: 2, tags: "Process improvement", memo: "Consider sending the setup guide" },
+    { username: "priya_founder", name: "Priya Shah", reactionType: "follow", score: 55, stage: "new", status: "read", text: "", likes: 0, replies: 0, quotes: 0, reposts: 0, tags: "", memo: "" },
+    { username: "liam_teamops", name: "Liam Carter", reactionType: "reply", score: 85, stage: "conversation", status: "read", text: "What settings would you recommend for a small team?", likes: 3, replies: 2, quotes: 0, reposts: 0, tags: "Social media,Lead generation", memo: "Explain the monthly plan in the next reply" },
+    { username: "northstar_growth", name: "Northstar Growth", reactionType: "like", score: 42, stage: "new", status: "read", text: "A simple workflow for making sure no response is missed.", likes: 1, replies: 0, quotes: 0, reposts: 0, tags: "Small business", memo: "" },
+    { username: "olivia_metrics", name: "Olivia Reed", reactionType: "quote", score: 71, stage: "interested", status: "handled", text: "How to read seven days of post analytics.", likes: 2, replies: 0, quotes: 2, reposts: 0, tags: "Marketing", memo: "Response completed" },
+    { username: "brightline_design", name: "Brightline Design", reactionType: "like", score: 58, stage: "new", status: "unread", text: "What to check before publishing an image post.", likes: 3, replies: 0, quotes: 0, reposts: 0, tags: "Social media", memo: "" },
+    { username: "ethan_startup", name: "Ethan Cole", reactionType: "reply", score: 88, stage: "conversation", status: "unread", text: "Where can I request a product walkthrough?", likes: 5, replies: 3, quotes: 0, reposts: 0, tags: "Lead generation,High intent", memo: "Reply with priority" },
+    { username: "harbor_office", name: "Harbor Office", reactionType: "repost", score: 59, stage: "new", status: "read", text: "Tips for keeping daily X operations manageable.", likes: 1, replies: 0, quotes: 0, reposts: 1, tags: "Process improvement", memo: "" },
+    { username: "taylor_comms", name: "Taylor Kim", reactionType: "quote", score: 76, stage: "interested", status: "read", text: "How our team shares responder context and next actions.", likes: 2, replies: 1, quotes: 1, reposts: 0, tags: "Social media,Follow up", memo: "Follow up next week" },
+    { username: "maple_stone_cafe", name: "Maple & Stone Café", reactionType: "follow", score: 48, stage: "completed", status: "handled", text: "", likes: 0, replies: 0, quotes: 0, reposts: 0, tags: "Small business", memo: "Onboarding completed" },
+  ];
+  const interactionSeeds = language === "en" ? interactionSeedsEn : interactionSeedsJa;
   const interactions = interactionSeeds.map((seed, index) => ({
     interactionId: `${SAMPLE_PREFIX}interaction:${index + 1}`,
     accountId: accountFor(index),
@@ -192,7 +212,7 @@ function buildXMarketingSampleData(accountIds: string[]): XMarketingSampleData {
     updatedAt: now,
   }));
 
-  const postSeeds = [
+  const postSeedsJa = [
     { text: "X運用で最初に整えたい3つのポイントをまとめました。", impressions: 12840, engagements: 932, likes: 486, replies: 42, reposts: 61, quotes: 18, bookmarks: 34, profileClicks: 76, urlClicks: 48 },
     { text: "投稿作成を効率化するためのチェックリストです。", impressions: 8640, engagements: 511, likes: 302, replies: 28, reposts: 35, quotes: 9, bookmarks: 26, profileClicks: 63, urlClicks: 39 },
     { text: "虎威の取得設定について、よくある質問をご紹介します。", impressions: 6240, engagements: 384, likes: 221, replies: 31, reposts: 22, quotes: 7, bookmarks: 19, profileClicks: 51, urlClicks: 32 },
@@ -200,6 +220,15 @@ function buildXMarketingSampleData(accountIds: string[]): XMarketingSampleData {
     { text: "毎日のX運用を短時間で続けるコツをまとめました。", impressions: 3860, engagements: 244, likes: 149, replies: 18, reposts: 19, quotes: 5, bookmarks: 13, profileClicks: 37, urlClicks: 22 },
     { text: "投稿分析の数字から次の企画を考える方法です。", impressions: 2940, engagements: 181, likes: 112, replies: 14, reposts: 13, quotes: 4, bookmarks: 10, profileClicks: 29, urlClicks: 18 },
   ];
+  const postSeedsEn = [
+    { text: "Three essentials to set up before you start managing X.", impressions: 12840, engagements: 932, likes: 486, replies: 42, reposts: 61, quotes: 18, bookmarks: 34, profileClicks: 76, urlClicks: 48 },
+    { text: "A practical checklist for a faster content workflow.", impressions: 8640, engagements: 511, likes: 302, replies: 28, reposts: 35, quotes: 9, bookmarks: 26, profileClicks: 63, urlClicks: 39 },
+    { text: "Answers to common questions about Torai collection settings.", impressions: 6240, engagements: 384, likes: 221, replies: 31, reposts: 22, quotes: 7, bookmarks: 19, profileClicks: 51, urlClicks: 32 },
+    { text: "A simple workflow for making sure no response is missed.", impressions: 4980, engagements: 318, likes: 184, replies: 24, reposts: 28, quotes: 6, bookmarks: 16, profileClicks: 44, urlClicks: 27 },
+    { text: "Tips for keeping daily X operations manageable.", impressions: 3860, engagements: 244, likes: 149, replies: 18, reposts: 19, quotes: 5, bookmarks: 13, profileClicks: 37, urlClicks: 22 },
+    { text: "How to turn post analytics into your next content idea.", impressions: 2940, engagements: 181, likes: 112, replies: 14, reposts: 13, quotes: 4, bookmarks: 10, profileClicks: 29, urlClicks: 18 },
+  ];
+  const postSeeds = language === "en" ? postSeedsEn : postSeedsJa;
   const posts = postSeeds.map((seed, index) => ({
     analyticsId: `${SAMPLE_PREFIX}post:${index + 1}`,
     accountId: accountFor(index),
@@ -222,7 +251,9 @@ function buildXMarketingSampleData(accountIds: string[]): XMarketingSampleData {
       snapshotDate: snapshotDate(capturedAt),
       accountId,
       postId: `188000000000000${accountIndex + 1}`,
-      postText: accountIndex === 0 ? "Xマーケティングの日別推移サンプル" : "サポート投稿の日別推移サンプル",
+      postText: language === "en"
+        ? accountIndex === 0 ? "X Marketing daily trend sample" : "Support-post daily trend sample"
+        : accountIndex === 0 ? "Xマーケティングの日別推移サンプル" : "サポート投稿の日別推移サンプル",
       createdAt: sampleTimestamp(7, 9),
       capturedAt,
       impressions: (2400 + accountIndex * 800) + factor * (980 + accountIndex * 260),
@@ -251,13 +282,14 @@ function buildXMarketingSampleData(accountIds: string[]): XMarketingSampleData {
   return { interactions, posts, daily, runs };
 }
 
-export function importXMarketingSampleData() {
+export function importXMarketingSampleData(input: any = {}) {
   const accountIds = getXAuthAll().map((account) => String(account.accountId || "")).filter(Boolean).slice(0, 2);
   if (!accountIds.length) throw new Error("X_MARKETING_SAMPLE_REQUIRES_X_ACCOUNT");
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(30000)) throw new Error("X_MARKETING_SAMPLE_LOCK_TIMEOUT");
   try {
-    const sample = buildXMarketingSampleData(accountIds);
+    const language = normalizeSampleLanguage(input?.language);
+    const sample = buildXMarketingSampleData(accountIds, language);
     replaceRows(mergeSampleRows(readRows(), sample.interactions, "interactionId"));
     replacePostRows(mergeSampleRows(readPostRows(), sample.posts, "analyticsId"));
     replaceDailyRows(mergeSampleRows(readDailyRows(), sample.daily, "snapshotId"));
@@ -265,6 +297,7 @@ export function importXMarketingSampleData() {
     appendRuns(sample.runs);
     return {
       status: "success",
+      language,
       accountIds,
       counts: { interactions: sample.interactions.length, posts: sample.posts.length, daily: sample.daily.length, runs: sample.runs.length },
     };

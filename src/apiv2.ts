@@ -550,7 +550,7 @@ export function doPost(e) {
             case "upsertSettings": response = upsertXMarketingSettings(requestData); break;
             case "refresh": response = refreshXMarketingDaily(); break;
             case "updateProspect": response = updateXMarketingProspect(requestData); break;
-            case "importSampleData": response = importXMarketingSampleData(); break;
+            case "importSampleData": response = importXMarketingSampleData(requestData); break;
             case "deleteSampleData": response = deleteXMarketingSampleData(); break;
             default: statusCode = 400; throw new Error(`Invalid action '${action}' for target 'xMarketing'`);
           }
