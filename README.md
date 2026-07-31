@@ -200,6 +200,33 @@ The setup code itself and the proxy secret are never written to the spreadsheet.
 
 Important deployment note: after editing `code.js` in Apps Script, click Save and deploy a new Web App version. `clasp push` or pasting code alone may leave the `/exec` URL serving an older deployed version.
 
+## Version source
+
+`package.json` is the source of truth for the x_Autopost version. The build runs
+`scripts/generate-version.js` and writes the same value to
+`src/generated/version.ts`, which is bundled into Apps Script.
+
+The release workflow determines the next GitHub release number before building,
+updates `package.json` in the workflow workspace, and then creates the bundle.
+This makes the version returned by Apps Script match the GitHub release tag
+without requiring Apps Script to call GitHub at runtime.
+
+To start a new minor or major release series, update only `package.json` (and its
+lock file) from a clean worktree:
+
+```bash
+npm version minor --no-git-tag-version
+npm version major --no-git-tag-version
+```
+
+The workflow reads the resulting major/minor series and increments only its
+patch number. No version series is hardcoded in the workflow.
+
+The deployed version can be retrieved through the signed Torai/GAS proxy with:
+
+- target: `system`
+- action: `getVersion`
+
 ## Trigger Management (`api/triggers.ts`)
 
 - API endpoints allow creating and deleting triggers.

@@ -25,6 +25,7 @@ import { archiveSheet } from "./api/archive";
 import { upsertNotificationSettings } from "./api/notificationSettings";
 import { sendDiscordTestNotification } from "./api/discordNotification";
 import { deleteXMarketingSampleData, getXMarketingDashboard, importXMarketingSampleData, refreshXMarketingDaily, updateXMarketingProspect, upsertXMarketingSettings } from "./api/xMarketing";
+import { getVersion } from "./api/version";
 import {
   assertProxyAuthorized,
   generateSetupCode,
@@ -535,13 +536,27 @@ export function doPost(e) {
               response = upsertNotificationSettings(requestData);
               break;
             case "test":
-              response = sendDiscordTestNotification(requestData?.webhookUrl);
+              response = sendDiscordTestNotification(
+                requestData?.webhookUrl,
+                requestData?.language
+              );
               break;
             default:
               statusCode = 400;
               throw new Error(
                 `Invalid action '${action}' for target 'notificationSettings'`
               );
+          }
+          break;
+
+        case "system":
+          switch (action) {
+            case "getVersion":
+              response = getVersion();
+              break;
+            default:
+              statusCode = 400;
+              throw new Error(`Invalid action '${action}' for target 'system'`);
           }
           break;
 
@@ -726,6 +741,11 @@ export function doGet(e) {
       case "xMarketing":
         if (action === "fetch") response = getXMarketingDashboard(e.parameter);
         else { statusCode = 400; throw new Error(`Invalid action '${action}' for target 'xMarketing' in GET request`); }
+        break;
+
+      case "system":
+        if (action === "getVersion") response = getVersion();
+        else { statusCode = 400; throw new Error(`Invalid action '${action}' for target 'system' in GET request`); }
         break;
 
       default:

@@ -1,6 +1,7 @@
 type PostNotificationStatus = "success" | "error" | "critical";
 type DiscordNotificationEventType = "post" | "test";
 type DiscordNotificationLogStatus = "success" | "failure";
+type DiscordNotificationLanguage = "ja" | "en";
 
 type PostNotificationPayload = {
   status: PostNotificationStatus;
@@ -14,6 +15,7 @@ type PostNotificationPayload = {
 
 export const DISCORD_NOTIFICATION_ENABLED_KEY = "discord_notification_enabled";
 export const DISCORD_WEBHOOK_URL_KEY = "discord_webhook_url";
+export const DISCORD_NOTIFICATION_LANGUAGE_KEY = "discord_notification_language";
 export const DISCORD_WEBHOOK_URL_PATTERN =
   /^https:\/\/((?:ptb|canary)\.)?(discord\.com|discordapp\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9._-]+(\?[\w=&-]+)?$/;
 const DISCORD_MESSAGE_LIMIT = 1900;
@@ -55,6 +57,12 @@ function truncate(value: string, maxLength: number): string {
 function formatOptionalLine(label: string, value?: string): string {
   const normalizedValue = value ? String(value).trim() : "";
   return normalizedValue ? `${label}: ${normalizedValue}` : "";
+}
+
+function normalizeDiscordNotificationLanguage(
+  value?: string | null
+): DiscordNotificationLanguage {
+  return String(value || "").toLowerCase().startsWith("en") ? "en" : "ja";
 }
 
 function getScriptTimeZone(): string {
@@ -131,24 +139,60 @@ function appendDiscordNotificationLog(entry: DiscordNotificationLogEntry): void 
   }
 }
 
-function buildDiscordMessage(payload: PostNotificationPayload): string {
+function buildDiscordMessage(
+  payload: PostNotificationPayload,
+  language: DiscordNotificationLanguage
+): string {
+  const messages = {
+    ja: {
+      titles: {
+        success: "X自動投稿が完了しました",
+        error: "X自動投稿に失敗しました",
+        critical: "X自動投稿で重大エラーが発生しました",
+      },
+      labels: {
+        accountId: "Xアカウント",
+        internalId: "内部ID",
+        postId: "X投稿ID",
+        scheduledAt: "予約日時",
+        content: "本文",
+        errorMessage: "エラー",
+      },
+    },
+    en: {
+      titles: {
+        success: "X auto-post completed",
+        error: "X auto-post failed",
+        critical: "A critical error occurred during X auto-posting",
+      },
+      labels: {
+        accountId: "X account",
+        internalId: "Internal ID",
+        postId: "X post ID",
+        scheduledAt: "Scheduled at",
+        content: "Post",
+        errorMessage: "Error",
+      },
+    },
+  } as const;
+  const text = messages[language];
   const titleByStatus: Record<PostNotificationStatus, string> = {
-    success: "X自動投稿が完了しました",
-    error: "X自動投稿に失敗しました",
-    critical: "X自動投稿で重大エラーが発生しました",
+    success: text.titles.success,
+    error: text.titles.error,
+    critical: text.titles.critical,
   };
 
   const lines = [
     `**${titleByStatus[payload.status]}**`,
-    formatOptionalLine("Xアカウント", payload.accountId),
-    formatOptionalLine("内部ID", payload.internalId),
-    formatOptionalLine("X投稿ID", payload.postId),
-    formatOptionalLine("予約日時", payload.scheduledAt),
+    formatOptionalLine(text.labels.accountId, payload.accountId),
+    formatOptionalLine(text.labels.internalId, payload.internalId),
+    formatOptionalLine(text.labels.postId, payload.postId),
+    formatOptionalLine(text.labels.scheduledAt, payload.scheduledAt),
     formatOptionalLine(
-      "本文",
+      text.labels.content,
       payload.content ? truncate(payload.content.replace(/\s+/g, " "), 300) : ""
     ),
-    formatOptionalLine("エラー", payload.errorMessage),
+    formatOptionalLine(text.labels.errorMessage, payload.errorMessage),
   ].filter(Boolean);
 
   return truncate(lines.join("\n"), DISCORD_MESSAGE_LIMIT);
@@ -182,12 +226,15 @@ function sendDiscordPostNotification(payload: PostNotificationPayload): void {
     const properties = PropertiesService.getScriptProperties();
     const enabled = properties.getProperty(DISCORD_NOTIFICATION_ENABLED_KEY) === "true";
     const webhookUrl = properties.getProperty(DISCORD_WEBHOOK_URL_KEY);
+    const language = normalizeDiscordNotificationLanguage(
+      properties.getProperty(DISCORD_NOTIFICATION_LANGUAGE_KEY)
+    );
 
     if (!enabled || !webhookUrl) {
       return;
     }
 
-    const result = postDiscordWebhook(webhookUrl, buildDiscordMessage(payload));
+    const result = postDiscordWebhook(webhookUrl, buildDiscordMessage(payload, language));
     appendDiscordNotificationLog({
       eventType: "post",
       status: payload.status,
@@ -214,11 +261,14 @@ function sendDiscordPostNotification(payload: PostNotificationPayload): void {
   }
 }
 
-function sendDiscordTestNotification(webhookUrl?: string): {
+function sendDiscordTestNotification(webhookUrl?: string, language?: string): {
   sent: boolean;
   hasWebhookUrl: boolean;
 } {
   const properties = PropertiesService.getScriptProperties();
+  const notificationLanguage = normalizeDiscordNotificationLanguage(
+    language || properties.getProperty(DISCORD_NOTIFICATION_LANGUAGE_KEY)
+  );
   const targetWebhookUrl =
     typeof webhookUrl === "string" && webhookUrl.trim()
       ? webhookUrl.trim()
@@ -232,13 +282,21 @@ function sendDiscordTestNotification(webhookUrl?: string): {
   }
 
   try {
+    const testMessage =
+      notificationLanguage === "en"
+        ? [
+            "**Torai Discord notification test**",
+            "If you received this message, your webhook URL is configured correctly.",
+            `Sent at: ${formatDiscordDateTime(new Date())}`,
+          ]
+        : [
+            "**虎威 Discord通知テスト**",
+            "このメッセージが届いていれば、Webhook URLは正しく設定されています。",
+            `送信日時: ${formatDiscordDateTime(new Date())}`,
+          ];
     const result = postDiscordWebhook(
       targetWebhookUrl,
-      [
-        "**虎威 Discord通知テスト**",
-        "このメッセージが届いていれば、Webhook URLは正しく設定されています。",
-        `送信日時: ${formatDiscordDateTime(new Date())}`,
-      ].join("\n")
+      testMessage.join("\n")
     );
     appendDiscordNotificationLog({
       eventType: "test",
@@ -261,5 +319,10 @@ function sendDiscordTestNotification(webhookUrl?: string): {
   };
 }
 
-export { formatDiscordDateTime, sendDiscordPostNotification, sendDiscordTestNotification };
-export type { PostNotificationPayload };
+export {
+  formatDiscordDateTime,
+  normalizeDiscordNotificationLanguage,
+  sendDiscordPostNotification,
+  sendDiscordTestNotification,
+};
+export type { DiscordNotificationLanguage, PostNotificationPayload };
