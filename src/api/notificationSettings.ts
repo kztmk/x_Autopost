@@ -1,12 +1,15 @@
 import {
   DISCORD_NOTIFICATION_ENABLED_KEY,
+  DISCORD_NOTIFICATION_LANGUAGE_KEY,
   DISCORD_WEBHOOK_URL_KEY,
   DISCORD_WEBHOOK_URL_PATTERN,
+  normalizeDiscordNotificationLanguage,
 } from "./discordNotification";
 
 type NotificationSettingsRequest = {
   enabled: boolean;
   webhookUrl?: string;
+  language?: string;
 };
 
 function isValidDiscordWebhookUrl(url: string): boolean {
@@ -25,6 +28,11 @@ function upsertNotificationSettings(request: NotificationSettingsRequest): {
   const currentWebhookUrl = properties.getProperty(DISCORD_WEBHOOK_URL_KEY);
   const webhookUrl =
     typeof request.webhookUrl === "string" ? request.webhookUrl.trim() : "";
+  const languageSettings: Record<string, string> = {};
+  if (typeof request.language === "string") {
+    languageSettings[DISCORD_NOTIFICATION_LANGUAGE_KEY] =
+      normalizeDiscordNotificationLanguage(request.language);
+  }
 
   if (request.enabled) {
     if (!webhookUrl) {
@@ -34,7 +42,10 @@ function upsertNotificationSettings(request: NotificationSettingsRequest): {
       if (!isValidDiscordWebhookUrl(currentWebhookUrl)) {
         throw new Error("Saved Discord Webhook URL is invalid.");
       }
-      properties.setProperty(DISCORD_NOTIFICATION_ENABLED_KEY, "true");
+      properties.setProperties({
+        [DISCORD_NOTIFICATION_ENABLED_KEY]: "true",
+        ...languageSettings,
+      });
       return {
         enabled: true,
         hasWebhookUrl: true,
@@ -48,6 +59,7 @@ function upsertNotificationSettings(request: NotificationSettingsRequest): {
     properties.setProperties({
       [DISCORD_NOTIFICATION_ENABLED_KEY]: "true",
       [DISCORD_WEBHOOK_URL_KEY]: webhookUrl,
+      ...languageSettings,
     });
 
     return {
@@ -58,6 +70,7 @@ function upsertNotificationSettings(request: NotificationSettingsRequest): {
 
   const propertiesToSet: Record<string, string> = {
     [DISCORD_NOTIFICATION_ENABLED_KEY]: "false",
+    ...languageSettings,
   };
   if (webhookUrl) {
     if (!isValidDiscordWebhookUrl(webhookUrl)) {

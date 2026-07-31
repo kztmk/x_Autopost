@@ -1,4 +1,4 @@
-export const VERSION = "1.0.33";
+export { VERSION } from "./generated/version";
 
 export const SHEETS = {
   POSTS: "Posts",
